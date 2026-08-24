@@ -1,0 +1,44 @@
+# ===== Legacy TypeScript implementation (reference only, not tracked) =====
+old-legacy/
+REFACTOR_PLAN.md
+
+# ===== Claude Code local state =====
+.claude/
+
+# ===== Runtime data (config, logs, pid) — always project-local, never ~/ =====
+backend/data/
+data/
+
+# ===== Go =====
+backend/bin/
+backend/mcphub
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Embedded frontend build artifacts, generated at build time
+backend/internal/webui/dist/
+
+# ===== Node / frontend =====
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Editors / OS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ===== Env =====
+.env
+.env.local
+.env.*.local
