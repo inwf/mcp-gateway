@@ -70,3 +70,17 @@ func Default() Config {
 		MCPServers: map[string]MCPServer{},
 	}
 }
+
+// DefaultMCPServer returns the values an upstream server entry takes for
+// the fields it does not specify.
+//
+// Enabled defaults to true, which is why loading seeds this value before
+// decoding an entry: after decoding, an omitted "enabled" and an
+// explicit "enabled: false" would be indistinguishable.
+func DefaultMCPServer() MCPServer {
+	return MCPServer{
+		Transport: TransportStdio,
+		Enabled:   true,
+		Timeout:   60 * time.Second,
+	}
+}
