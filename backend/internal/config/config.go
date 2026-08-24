@@ -151,9 +151,15 @@ type Gateway struct {
 
 // SessionModeRules maps User-Agent substrings to a session mode. Matching
 // is case-insensitive.
+//
+// An empty list and an absent list both mean "no rules for this mode",
+// so these may be omitted from a saved file without changing meaning.
+// That is not true of every empty value in this schema: an empty
+// [Security.AllowedNetworks] means "allow every client", which is the
+// opposite of what the default produces when the key is absent.
 type SessionModeRules struct {
-	Stateful  []string `yaml:"stateful"`
-	Stateless []string `yaml:"stateless"`
+	Stateful  []string `yaml:"stateful,omitempty"`
+	Stateless []string `yaml:"stateless,omitempty"`
 }
 
 // Startup configures how upstream servers are brought up at boot.
