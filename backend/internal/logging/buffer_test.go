@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"mcphub/internal/config"
 	"mcphub/internal/logging"
 )
 
@@ -75,9 +76,36 @@ func TestQueryFiltersByLevel(t *testing.T) {
 	store.Append(entry(base.Add(time.Second), slog.LevelInfo, "info", logging.ModuleAPI, ""))
 	store.Append(entry(base.Add(2*time.Second), slog.LevelError, "error", logging.ModuleAPI, ""))
 
-	got := messages(store.Query(logging.Query{MinLevel: slog.LevelInfo}))
+	got := messages(store.Query(logging.Query{MinLevel: config.LevelInfo}))
 	if want := []string{"info", "error"}; !equal(got, want) {
 		t.Errorf("Query = %v, want %v", got, want)
+	}
+}
+
+// slog.LevelInfo is zero, so a level field typed as slog.Level cannot
+// tell "no filter" from "info and above" — an empty query would silently
+// hide every debug record. The level is named rather than numeric for
+// exactly this reason.
+func TestEmptyQueryReturnsEveryLevel(t *testing.T) {
+	base := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	store := logging.NewStore(10)
+	store.Append(entry(base, slog.LevelDebug, "debug", logging.ModuleAPI, ""))
+	store.Append(entry(base.Add(time.Second), slog.LevelInfo, "info", logging.ModuleAPI, ""))
+
+	got := messages(store.Query(logging.Query{}))
+	if want := []string{"debug", "info"}; !equal(got, want) {
+		t.Errorf("Query = %v, want %v; debug records were dropped", got, want)
+	}
+}
+
+// A malformed level in a query parameter must not read as an empty log.
+func TestUnknownLevelFiltersNothing(t *testing.T) {
+	store := logging.NewStore(10)
+	store.Append(entry(time.Now(), slog.LevelDebug, "debug", logging.ModuleAPI, ""))
+	store.Append(entry(time.Now(), slog.LevelError, "error", logging.ModuleAPI, ""))
+
+	if got := store.Query(logging.Query{MinLevel: "loud"}); len(got) != 2 {
+		t.Errorf("Query = %v, want every record", messages(got))
 	}
 }
 

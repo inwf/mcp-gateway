@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"mcphub/internal/config"
 )
 
 // DefaultCapacity is how many records each buffer retains. Log history
@@ -34,8 +36,14 @@ type Query struct {
 	// Module limits results to one subsystem. Empty means all.
 	Module string
 
-	// MinLevel drops records below this severity.
-	MinLevel slog.Level
+	// MinLevel drops records below this severity. Empty means every
+	// level.
+	//
+	// This is a level *name* rather than a [slog.Level] because
+	// slog.LevelInfo is zero: a slog.Level field could not tell "no
+	// filter" apart from "info and above", and would silently hide debug
+	// records from a caller that passed an empty query.
+	MinLevel config.LogLevel
 
 	// Since drops records at or before this time. The zero value means
 	// no lower bound.
@@ -44,6 +52,20 @@ type Query struct {
 	// Limit caps the number of results, keeping the most recent. Zero
 	// means no cap.
 	Limit int
+}
+
+// threshold resolves MinLevel, reporting whether a filter applies at all.
+func (q Query) threshold() (slog.Level, bool) {
+	if q.MinLevel == "" {
+		return 0, false
+	}
+	level, err := ParseLevel(q.MinLevel)
+	if err != nil {
+		// An unrecognised name filters nothing rather than everything:
+		// a bad query parameter should not look like an empty log.
+		return 0, false
+	}
+	return level, true
 }
 
 // buffer is a fixed-capacity ring of entries. Once full, each write
@@ -138,9 +160,11 @@ func (s *Store) Query(q Query) []Entry {
 	entries := source.all()
 	s.mu.RUnlock()
 
+	minLevel, hasMinLevel := q.threshold()
+
 	filtered := make([]Entry, 0, len(entries))
 	for _, e := range entries {
-		if e.Level < q.MinLevel {
+		if hasMinLevel && e.Level < minLevel {
 			continue
 		}
 		if q.Module != "" && e.Module != q.Module {
