@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"maps"
 	"slices"
 
@@ -63,6 +64,7 @@ func BuildAggregate(tools map[string][]*mcp.Tool) Aggregate {
 func renameTool(tool *mcp.Tool, exposed, server string) *mcp.Tool {
 	copied := *tool
 	copied.Name = exposed
+	copied.InputSchema = normalizeInputSchema(copied.InputSchema)
 
 	// Saying which server a tool came from is what lets a model choose
 	// between three tools that all claim to search something.
@@ -73,6 +75,39 @@ func renameTool(tool *mcp.Tool, exposed, server string) *mcp.Tool {
 	}
 
 	return &copied
+}
+
+// emptyObjectSchema accepts any arguments and constrains none.
+func emptyObjectSchema() map[string]any {
+	return map[string]any{"type": "object"}
+}
+
+// normalizeInputSchema guarantees a schema that describes an object.
+//
+// Registering a tool whose schema is missing, or whose type is anything
+// other than "object", is rejected outright by the SDK — so one upstream
+// server with a malformed schema would otherwise take the whole gateway
+// down. Substituting a permissive schema keeps the tool callable and
+// contains the damage to that one tool's argument validation.
+func normalizeInputSchema(schema any) any {
+	if schema == nil {
+		return emptyObjectSchema()
+	}
+
+	// The schema arrives as whatever the upstream sent, so it has to be
+	// inspected through its JSON form rather than by type assertion.
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return emptyObjectSchema()
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return emptyObjectSchema()
+	}
+	if decoded["type"] != "object" {
+		return emptyObjectSchema()
+	}
+	return schema
 }
 
 // FilterTools drops the tools a server's configuration does not expose.

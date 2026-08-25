@@ -27,10 +27,12 @@ type fakeUpstreams struct {
 	tools     map[string][]*mcp.Tool
 	resources map[string][]*mcp.Resource
 
-	// calls records what was forwarded, and callErr forces a failure.
-	calls   []string
-	callErr error
-	result  *mcp.CallToolResult
+	// calls records what was forwarded, lastArgs keeps the arguments
+	// exactly as they arrived, and callErr forces a failure.
+	calls    []string
+	lastArgs any
+	callErr  error
+	result   *mcp.CallToolResult
 }
 
 func (f *fakeUpstreams) Statuses() []upstream.Status           { return f.statuses }
@@ -39,6 +41,7 @@ func (f *fakeUpstreams) Resources() map[string][]*mcp.Resource { return f.resour
 
 func (f *fakeUpstreams) CallTool(_ context.Context, server, tool string, args any) (*mcp.CallToolResult, error) {
 	f.calls = append(f.calls, server+"/"+tool)
+	f.lastArgs = args
 	if f.callErr != nil {
 		return nil, f.callErr
 	}
@@ -46,8 +49,28 @@ func (f *fakeUpstreams) CallTool(_ context.Context, server, tool string, args an
 		return f.result, nil
 	}
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("called %s/%s with %v", server, tool, args)}},
+		Content: []mcp.Content{&mcp.TextContent{
+			Text: fmt.Sprintf("called %s/%s with %s", server, tool, renderArgs(args))}},
 	}, nil
+}
+
+// renderArgs shows arguments as JSON whether they arrived decoded or, as
+// they do over the wire, as the raw bytes the client sent.
+func renderArgs(args any) string {
+	switch v := args.(type) {
+	case nil:
+		return "null"
+	case json.RawMessage:
+		return string(v)
+	case []byte:
+		return string(v)
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(encoded)
+	}
 }
 
 func (f *fakeUpstreams) ReadResource(_ context.Context, server, uri string) (*mcp.ReadResourceResult, error) {
