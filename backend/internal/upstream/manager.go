@@ -324,3 +324,21 @@ func sameServer(a, b config.MCPServer) bool {
 	a.Tags, b.Tags = nil, nil
 	return reflect.DeepEqual(a, b)
 }
+
+// CallTool invokes a tool on one server by name.
+func (m *Manager) CallTool(ctx context.Context, server, tool string, args any) (*mcp.CallToolResult, error) {
+	conn, ok := m.Get(server)
+	if !ok {
+		return nil, fmt.Errorf("%s: %w", server, ErrUnknownServer)
+	}
+	return conn.CallTool(ctx, tool, args)
+}
+
+// ReadResource fetches a resource from one server by name.
+func (m *Manager) ReadResource(ctx context.Context, server, uri string) (*mcp.ReadResourceResult, error) {
+	conn, ok := m.Get(server)
+	if !ok {
+		return nil, fmt.Errorf("%s: %w", server, ErrUnknownServer)
+	}
+	return conn.ReadResource(ctx, uri)
+}
