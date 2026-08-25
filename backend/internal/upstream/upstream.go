@@ -145,6 +145,8 @@ func (c *Conn) Connect(ctx context.Context) error {
 	c.mu.Unlock()
 	c.deps.notify(c.name, ChangeStatus)
 
+	c.watchSession(session)
+
 	c.deps.logger().Info("connected",
 		"transport", cfg.Transport,
 		"serverName", c.status.ServerName,
@@ -152,6 +154,36 @@ func (c *Conn) Connect(ctx context.Context) error {
 		"tools", len(c.Tools()),
 		"resources", len(c.Resources()))
 	return nil
+}
+
+// watchSession notices a session that ends on its own.
+//
+// A child process that crashes, or a remote server that hangs up, would
+// otherwise leave the connection looking healthy: its tools would stay
+// on offer and every call would fail one at a time. Watching for the end
+// turns that into a single visible state change.
+func (c *Conn) watchSession(session *mcp.ClientSession) {
+	go func() {
+		err := session.Wait()
+
+		c.mu.Lock()
+		// A deliberate teardown has already replaced the session, and is
+		// not a fault.
+		if c.session != session {
+			c.mu.Unlock()
+			return
+		}
+		c.session = nil
+		c.tools, c.resources = nil, nil
+		if err == nil {
+			err = errors.New("the server closed the connection")
+		}
+		c.setStateLocked(StateFailed, err)
+		c.mu.Unlock()
+
+		c.deps.logger().Warn("the connection ended unexpectedly", "error", err)
+		c.deps.notify(c.name, ChangeStatus)
+	}()
 }
 
 // Close tears down the session. It is safe to call on a connection that

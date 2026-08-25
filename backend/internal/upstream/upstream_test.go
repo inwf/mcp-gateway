@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +13,7 @@ import (
 
 	"mcphub/internal/config"
 	"mcphub/internal/logging"
+	"mcphub/internal/testmcp"
 	"mcphub/internal/upstream"
 )
 
@@ -21,17 +21,11 @@ import (
 // requested mode.
 func serverConfig(t *testing.T, mode string) config.MCPServer {
 	t.Helper()
-	self, err := os.Executable()
+	cfg, err := testmcp.ServerConfig(mode)
 	if err != nil {
-		t.Fatalf("locate the test binary: %v", err)
+		t.Fatalf("build the test server configuration: %v", err)
 	}
-	return config.MCPServer{
-		Transport: config.TransportStdio,
-		Command:   self,
-		Env:       map[string]string{serverModeEnv: mode},
-		Enabled:   true,
-		Timeout:   20 * time.Second,
-	}
+	return cfg
 }
 
 // recorder collects the change notifications a connection emits.
