@@ -99,7 +99,7 @@ func TestCreatingAServer(t *testing.T) {
 
 	resp := h.do(t, http.MethodPost, "/api/servers", map[string]any{
 		"name":   "added",
-		"server": server(nil),
+		"server": toWire(t, server(nil)),
 	})
 
 	var view api.ServerView
@@ -122,7 +122,7 @@ func TestCreatingAServerThatAlreadyExists(t *testing.T) {
 
 	resp := h.do(t, http.MethodPost, "/api/servers", map[string]any{
 		"name":   "files",
-		"server": server(nil),
+		"server": toWire(t, server(nil)),
 	})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
@@ -141,7 +141,7 @@ func TestCreatingAServerWithoutAName(t *testing.T) {
 	h := start(t, nil)
 
 	resp := h.do(t, http.MethodPost, "/api/servers", map[string]any{
-		"server": server(nil),
+		"server": toWire(t, server(nil)),
 	})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", resp.StatusCode)
@@ -156,7 +156,7 @@ func TestCreatingAnInvalidServer(t *testing.T) {
 
 	resp := h.do(t, http.MethodPost, "/api/servers", map[string]any{
 		"name":   "broken",
-		"server": server(func(s *config.MCPServer) { s.Command = "" }),
+		"server": toWire(t, server(func(s *config.MCPServer) { s.Command = "" })),
 	})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", resp.StatusCode)
@@ -173,7 +173,7 @@ func TestCreatingAServerWithAnUnusableName(t *testing.T) {
 
 	resp := h.do(t, http.MethodPost, "/api/servers", map[string]any{
 		"name":   "has spaces/and-slashes",
-		"server": server(nil),
+		"server": toWire(t, server(nil)),
 	})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("status = %d, want 422", resp.StatusCode)
@@ -187,7 +187,7 @@ func TestUpdatingAServer(t *testing.T) {
 
 	updated := server(func(s *config.MCPServer) { s.Description = "renamed" })
 	decode(t, h.do(t, http.MethodPut, "/api/servers/files",
-		map[string]any{"server": updated}), http.StatusOK, nil)
+		map[string]any{"server": toWire(t, updated)}), http.StatusOK, nil)
 
 	if got := h.Configs.Get().MCPServers["files"].Description; got != "renamed" {
 		t.Errorf("description = %q, want renamed", got)
@@ -198,7 +198,7 @@ func TestUpdatingAServerThatDoesNotExist(t *testing.T) {
 	h := start(t, nil)
 
 	resp := h.do(t, http.MethodPut, "/api/servers/nowhere",
-		map[string]any{"server": server(nil)})
+		map[string]any{"server": toWire(t, server(nil))})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
@@ -213,10 +213,10 @@ func TestUpdatingAServerKeepsItsSecrets(t *testing.T) {
 	var read api.ServerView
 	decode(t, h.get(t, "/api/servers/files"), http.StatusOK, &read)
 
-	edited := read.Config
+	edited := read.Config.MCPServer
 	edited.Description = "edited"
 	decode(t, h.do(t, http.MethodPut, "/api/servers/files",
-		map[string]any{"server": edited}), http.StatusOK, nil)
+		map[string]any{"server": toWire(t, edited)}), http.StatusOK, nil)
 
 	if got := h.Configs.Get().MCPServers["files"].Env["API_TOKEN"]; got != "the-real-token" {
 		t.Errorf("API_TOKEN = %q, want the original secret to survive", got)
@@ -230,7 +230,7 @@ func TestUpdatingAServerWithInvalidValuesChangesNothing(t *testing.T) {
 	h := start(t, func(o *api.Options) { o.Configs = configs(t, twoServers) })
 
 	resp := h.do(t, http.MethodPut, "/api/servers/files",
-		map[string]any{"server": server(func(s *config.MCPServer) { s.Command = "" })})
+		map[string]any{"server": toWire(t, server(func(s *config.MCPServer) { s.Command = "" }))})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", resp.StatusCode)
 	}
@@ -307,5 +307,59 @@ func TestListingToolsOfADisconnectedServer(t *testing.T) {
 	}
 	if got := envelopeOf(t, resp).Error.Message; !contains(got, "not connected") {
 		t.Errorf("message = %q, want it to say the server is not connected", got)
+	}
+}
+
+// A server with no process must not report a start time. The zero time
+// marshals as the year 1, which a reader has to know to disbelieve —
+// and a UI that formats it shows "1 Jan 0001" beside a server that is
+// working perfectly well.
+func TestAServerWithNoProcessReportsNoStartTime(t *testing.T) {
+	h := start(t, func(o *api.Options) { o.Configs = configs(t, withSecrets) })
+
+	var raw struct {
+		Servers []map[string]any `json:"servers"`
+	}
+	decode(t, h.get(t, "/api/servers"), http.StatusOK, &raw)
+
+	if len(raw.Servers) == 0 {
+		t.Fatal("no servers were reported")
+	}
+	status, ok := raw.Servers[0]["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("no status: %+v", raw.Servers[0])
+	}
+	if value, present := status["startedAt"]; present {
+		t.Errorf("startedAt = %#v, want the field absent for a server with no process", value)
+	}
+	if value, present := status["pid"]; present {
+		t.Errorf("pid = %#v, want the field absent for a server with no process", value)
+	}
+	if value, present := status["lastCheck"]; present {
+		t.Errorf("lastCheck = %#v, want the field absent for a server never checked", value)
+	}
+}
+
+// A newly created server has never been reached for either, and the
+// response the form reads back has to say so rather than report the
+// year 1.
+func TestACreatedServerReportsNoCheckTime(t *testing.T) {
+	h := start(t, nil)
+
+	var raw map[string]any
+	decode(t, h.do(t, http.MethodPost, "/api/servers", map[string]any{
+		"name":   "added",
+		"server": toWire(t, server(nil)),
+	}), http.StatusCreated, &raw)
+
+	status, ok := raw["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("no status: %+v", raw)
+	}
+	if got := status["state"]; got != string(upstream.StateDisconnected) {
+		t.Errorf("state = %#v, want disconnected", got)
+	}
+	if value, present := status["lastCheck"]; present {
+		t.Errorf("lastCheck = %#v, want the field absent", value)
 	}
 }

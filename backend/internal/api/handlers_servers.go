@@ -16,9 +16,9 @@ import (
 // ServerView is one server as the API reports it: what it is configured
 // to be, and what it is currently doing.
 type ServerView struct {
-	Name   string           `json:"name"`
-	Config config.MCPServer `json:"config"`
-	Status upstream.Status  `json:"status"`
+	Name   string          `json:"name"`
+	Config wireServer      `json:"config"`
+	Status upstream.Status `json:"status"`
 }
 
 // ===== step 60: server CRUD =====
@@ -50,7 +50,7 @@ func (a *API) viewOf(name string, server config.MCPServer, statuses map[string]u
 		// connection manager still has a truthful state to report.
 		status = upstream.Status{Name: name, State: upstream.StateDisconnected}
 	}
-	return ServerView{Name: name, Config: server.Redact(), Status: status}
+	return ServerView{Name: name, Config: wireServer{server.Redact()}, Status: status}
 }
 
 func (a *API) handleGetServer(c *gin.Context) {
@@ -70,8 +70,8 @@ func (a *API) handleGetServer(c *gin.Context) {
 
 func (a *API) handleCreateServer(c *gin.Context) {
 	var body struct {
-		Name   string           `json:"name"`
-		Server config.MCPServer `json:"server"`
+		Name   string     `json:"name"`
+		Server wireServer `json:"server"`
 	}
 	if err := bindJSON(c, &body); err != nil {
 		fail(c, err)
@@ -92,7 +92,7 @@ func (a *API) handleCreateServer(c *gin.Context) {
 		if current.MCPServers == nil {
 			current.MCPServers = map[string]config.MCPServer{}
 		}
-		current.MCPServers[body.Name] = body.Server
+		current.MCPServers[body.Name] = body.Server.MCPServer
 		return current.Validate()
 	})
 	if err != nil {
@@ -111,7 +111,7 @@ func (a *API) handleCreateServer(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, ServerView{
 		Name:   body.Name,
-		Config: body.Server.Redact(),
+		Config: wireServer{body.Server.Redact()},
 		Status: upstream.Status{Name: body.Name, State: upstream.StateDisconnected},
 	})
 }
@@ -123,14 +123,14 @@ func (a *API) handleUpdateServer(c *gin.Context) {
 	}
 
 	var body struct {
-		Server config.MCPServer `json:"server"`
+		Server wireServer `json:"server"`
 	}
 	if err := bindJSON(c, &body); err != nil {
 		fail(c, err)
 		return
 	}
 
-	updated := restoreServerSecrets(body.Server, existing)
+	updated := restoreServerSecrets(body.Server.MCPServer, existing)
 	if _, err := a.opts.Configs.Update(func(current *config.Config) error {
 		current.MCPServers[name] = updated
 		return current.Validate()
@@ -142,7 +142,15 @@ func (a *API) handleUpdateServer(c *gin.Context) {
 	a.log.Info("a server was changed", "requestId", RequestID(c), "server", name)
 	a.applyConfig(c)
 
-	c.JSON(http.StatusOK, ServerView{Name: name, Config: updated.Redact()})
+	// The status is read back rather than left zero-valued: a view whose
+	// state is the empty string would show as an unrecognised state in
+	// the UI, when what is true is that the server is still in whatever
+	// state it was before the edit.
+	c.JSON(http.StatusOK, ServerView{
+		Name:   name,
+		Config: wireServer{updated.Redact()},
+		Status: a.statusOfServer(name),
+	})
 }
 
 func (a *API) handleDeleteServer(c *gin.Context) {

@@ -43,6 +43,11 @@ func LoadOrDefault(path string) (Config, error) {
 
 // Parse decodes a configuration document over the defaults. An empty
 // document yields exactly [Default].
+//
+// A key the configuration does not define is an error rather than
+// something to ignore. Ignoring it is the worse failure: a misspelled
+// key leaves the default silently in force, so the setting appears to
+// have been made and has not been, and nothing in the logs says why.
 func Parse(data []byte) (Config, error) {
 	cfg := Default()
 
@@ -52,7 +57,7 @@ func Parse(data []byte) (Config, error) {
 		return cfg, nil
 	}
 
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.UnmarshalWithOptions(data, &cfg, yaml.DisallowUnknownField()); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 
@@ -91,11 +96,31 @@ func parseMCPServers(data []byte) (map[string]MCPServer, error) {
 		// A key with no body ("myserver:") decodes to a null node and
 		// leaves the defaults in place, which is the useful reading.
 		if node != nil {
-			if err := yaml.NodeToValue(node, &server); err != nil {
+			if err := yaml.NodeToValue(node, &server, yaml.DisallowUnknownField()); err != nil {
 				return nil, fmt.Errorf("parse config: mcpServers.%s: %w", name, err)
 			}
 		}
 		servers[name] = server
 	}
 	return servers, nil
+}
+
+// ParseServer decodes one server entry over [DefaultMCPServer].
+//
+// This is the single-entry counterpart to [Parse], for callers that
+// accept one server rather than a whole configuration. It exists here
+// rather than at the caller so that both paths default and reject
+// unknown keys the same way; a server added through the management API
+// must not behave differently from the same server written into the
+// file by hand.
+func ParseServer(data []byte) (MCPServer, error) {
+	server := DefaultMCPServer()
+
+	if len(bytes.TrimSpace(data)) == 0 {
+		return server, nil
+	}
+	if err := yaml.UnmarshalWithOptions(data, &server, yaml.DisallowUnknownField()); err != nil {
+		return MCPServer{}, fmt.Errorf("parse server: %w", err)
+	}
+	return server, nil
 }

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml"
+
 	"mcphub/internal/config"
 )
 
@@ -284,5 +286,103 @@ func TestParseIsIndependentOfDefaults(t *testing.T) {
 
 	if config.Default().Security.AllowedNetworks[0] != "127.0.0.1/32" {
 		t.Error("parsing mutated the package defaults")
+	}
+}
+
+// A key the configuration does not define is refused rather than
+// ignored.
+//
+// Ignoring it is the worse failure of the two: the setting appears to
+// have been made, it has not been, and nothing in the file or the log
+// says why. A typo in a key is far more likely than a deliberate extra
+// key, and there is nothing a stray key could usefully mean.
+func TestParseRefusesAnUnknownKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		document string
+		names    string
+	}{
+		{"at the top level", "listn:\n  port: 9000\n", "listn"},
+		{"inside a section", "listen:\n  prot: 9000\n", "prot"},
+		{"a near miss in casing", "logging:\n  maxsizemb: 10\n", "maxsizemb"},
+		{"inside a server", "mcpServers:\n  files:\n    transport: stdio\n    commnad: echo\n", "commnad"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(tt.document))
+			if err == nil {
+				t.Fatalf("Parse accepted %q", tt.document)
+			}
+			if !strings.Contains(err.Error(), tt.names) {
+				t.Errorf("error %q does not name the offending key %q", err, tt.names)
+			}
+		})
+	}
+}
+
+// ParseServer is what the management API uses to read one server, and it
+// has to default and refuse exactly as the file does — a server added
+// through the UI must not behave differently from the same server typed
+// into the file.
+func TestParseServerDefaultsTheFieldsItIsNotGiven(t *testing.T) {
+	server, err := config.ParseServer([]byte("transport: stdio\ncommand: echo\n"))
+	if err != nil {
+		t.Fatalf("ParseServer: %v", err)
+	}
+
+	if server.Timeout != config.DefaultMCPServer().Timeout {
+		t.Errorf("timeout = %v, want the default %v",
+			server.Timeout, config.DefaultMCPServer().Timeout)
+	}
+	if server.Command != "echo" {
+		t.Errorf("command = %q, want echo", server.Command)
+	}
+}
+
+func TestParseServerRefusesAnUnknownKey(t *testing.T) {
+	_, err := config.ParseServer([]byte("transport: stdio\ncomand: echo\n"))
+	if err == nil {
+		t.Fatal("ParseServer accepted an unknown key")
+	}
+	if !strings.Contains(err.Error(), "comand") {
+		t.Errorf("error %q does not name the offending key", err)
+	}
+}
+
+// An empty document is a server that is entirely default, which is what
+// a create request with no body beyond a name means.
+func TestParseServerAcceptsAnEmptyDocument(t *testing.T) {
+	server, err := config.ParseServer(nil)
+	if err != nil {
+		t.Fatalf("ParseServer: %v", err)
+	}
+	if server.Timeout != config.DefaultMCPServer().Timeout {
+		t.Errorf("timeout = %v, want the default", server.Timeout)
+	}
+}
+
+// Durations are written the way a person writes them, in both
+// directions. This is the property the management API depends on to
+// avoid expressing a duration as an integer, which is ambiguous in a
+// way no reader can resolve.
+func TestDurationsRoundTripAsWrittenText(t *testing.T) {
+	cfg, err := config.Parse([]byte("logging:\n  maxAge: 168h\nsecurity:\n  connectionTimeout: 90s\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Logging.MaxAge != 168*time.Hour {
+		t.Errorf("maxAge = %v, want 168h", cfg.Logging.MaxAge)
+	}
+	if cfg.Security.ConnectionTimeout != 90*time.Second {
+		t.Errorf("connectionTimeout = %v, want 90s", cfg.Security.ConnectionTimeout)
+	}
+
+	encoded, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), "maxAge: 168h0m0s") {
+		t.Errorf("encoded form does not carry a readable duration:\n%s", encoded)
 	}
 }

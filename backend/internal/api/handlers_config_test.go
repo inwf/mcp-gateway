@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -33,8 +34,8 @@ func withSecrets(cfg *config.Config) {
 }
 
 type configResponse struct {
-	Config config.Config `json:"config"`
-	Path   string        `json:"path"`
+	Config json.RawMessage `json:"config"`
+	Path   string          `json:"path"`
 }
 
 // ===== reading =====
@@ -45,7 +46,7 @@ func TestReadingTheConfigurationHidesSecrets(t *testing.T) {
 	var got configResponse
 	decode(t, h.get(t, "/api/config"), http.StatusOK, &got)
 
-	env := got.Config.MCPServers["files"].Env
+	env := configFromWire(t, got.Config).MCPServers["files"].Env
 	if env["API_TOKEN"] != config.RedactedValue {
 		t.Errorf("API_TOKEN = %q, want it hidden", env["API_TOKEN"])
 	}
@@ -73,10 +74,10 @@ func TestSavingBackARedactedConfigurationKeepsTheSecrets(t *testing.T) {
 	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
 
 	// Change something unrelated, exactly as a settings form would.
-	edited := read.Config
+	edited := configFromWire(t, read.Config)
 	edited.Logging.Level = config.LevelWarn
 
-	decode(t, h.do(t, http.MethodPut, "/api/config", map[string]any{"config": edited}),
+	decode(t, h.do(t, http.MethodPut, "/api/config", map[string]any{"config": toWire(t, edited)}),
 		http.StatusOK, nil)
 
 	stored := h.Configs.Get()
@@ -96,12 +97,12 @@ func TestANewSecretReplacesTheOldOne(t *testing.T) {
 	var read configResponse
 	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
 
-	edited := read.Config
+	edited := configFromWire(t, read.Config)
 	server := edited.MCPServers["files"]
 	server.Env = map[string]string{"API_TOKEN": "the-rotated-token", "LOG_LEVEL": "debug"}
 	edited.MCPServers["files"] = server
 
-	decode(t, h.do(t, http.MethodPut, "/api/config", map[string]any{"config": edited}),
+	decode(t, h.do(t, http.MethodPut, "/api/config", map[string]any{"config": toWire(t, edited)}),
 		http.StatusOK, nil)
 
 	if got := h.Configs.Get().MCPServers["files"].Env["API_TOKEN"]; got != "the-rotated-token" {
@@ -127,7 +128,7 @@ func TestURLCredentialsSurviveARoundTrip(t *testing.T) {
 	var read configResponse
 	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
 
-	if got := read.Config.MCPServers["remote"].URL; !contains(got, config.RedactedURLUser) {
+	if got := configFromWire(t, read.Config).MCPServers["remote"].URL; !contains(got, config.RedactedURLUser) {
 		t.Fatalf("url = %q, want the credentials hidden", got)
 	}
 
@@ -148,7 +149,7 @@ func TestAnInvalidConfigurationIsRejectedAndChangesNothing(t *testing.T) {
 	broken := before.Clone()
 	broken.Listen.Port = 99999
 
-	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{"config": broken})
+	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{"config": toWire(t, broken)})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", resp.StatusCode)
 	}
@@ -184,7 +185,7 @@ func TestEveryProblemIsReportedTogether(t *testing.T) {
 		"no-command": server(func(s *config.MCPServer) { s.Command = "" }),
 	}
 
-	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{"config": broken})
+	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{"config": toWire(t, broken)})
 	envelope := envelopeOf(t, resp)
 
 	if len(envelope.Error.Fields) < 3 {
@@ -209,7 +210,7 @@ func TestValidatingDoesNotSave(t *testing.T) {
 		Fields []api.FieldError `json:"fields"`
 	}
 	decode(t, h.do(t, http.MethodPost, "/api/config/validate",
-		map[string]any{"config": proposed}), http.StatusOK, &result)
+		map[string]any{"config": toWire(t, proposed)}), http.StatusOK, &result)
 
 	if !result.Valid {
 		t.Errorf("a valid configuration was reported invalid: %+v", result.Fields)
@@ -230,7 +231,7 @@ func TestValidatingReportsProblemsWithoutSaving(t *testing.T) {
 		Fields []api.FieldError `json:"fields"`
 	}
 	decode(t, h.do(t, http.MethodPost, "/api/config/validate",
-		map[string]any{"config": proposed}), http.StatusOK, &result)
+		map[string]any{"config": toWire(t, proposed)}), http.StatusOK, &result)
 
 	if result.Valid {
 		t.Error("an invalid configuration was reported valid")
@@ -273,5 +274,32 @@ func TestASecondJSONDocumentIsRejected(t *testing.T) {
 	resp := h.raw(t, http.MethodPut, "/api/config", `{"config":{}} {"config":{}}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// The change list is a list even when nothing changed: a caller that
+// iterates it should not have to tell null from empty first.
+func TestTheChangeListIsAlwaysAList(t *testing.T) {
+	h := start(t, nil)
+
+	var read struct {
+		Config json.RawMessage `json:"config"`
+	}
+	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
+
+	// Saving what was just read changes nothing, which is the case that
+	// would otherwise report null.
+	var result struct {
+		Changes []config.Change `json:"changes"`
+	}
+	decode(t, h.do(t, http.MethodPut, "/api/config",
+		map[string]any{"config": read.Config}), http.StatusOK, &result)
+
+	if result.Changes == nil {
+		t.Error("changes came back as null rather than an empty list")
+	}
+	if len(result.Changes) != 0 {
+		t.Errorf("saving an unchanged configuration reported %d changes: %+v",
+			len(result.Changes), result.Changes)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/goccy/go-yaml"
 
 	"mcphub/internal/api"
 	"mcphub/internal/config"
@@ -203,6 +204,137 @@ func logText(store *logging.Store) string {
 		text += "\n"
 	}
 	return text
+}
+
+// ===== the configuration on the wire =====
+
+// Configuration crosses the wire in the shape the file uses: the file's
+// field names, and durations written the way a person writes them. These
+// two helpers convert between that shape and a Go value, so that a test
+// can say what it means in Go and still send what a browser would send.
+//
+// Neither helper is what pins the shape — a helper that agreed with a
+// broken encoder would hide the breakage. The shape is pinned by
+// TestTheConfigurationIsSpokenInTheShapeOfTheFile below, against
+// literals.
+
+func toWire(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+
+	asYAML, err := yaml.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode for the wire: %v", err)
+	}
+	asJSON, err := yaml.YAMLToJSON(asYAML)
+	if err != nil {
+		t.Fatalf("encode for the wire: %v", err)
+	}
+	return json.RawMessage(asJSON)
+}
+
+func configFromWire(t *testing.T, raw json.RawMessage) config.Config {
+	t.Helper()
+
+	asYAML, err := yaml.JSONToYAML(raw)
+	if err != nil {
+		t.Fatalf("decode from the wire: %v", err)
+	}
+	cfg, err := config.Parse(asYAML)
+	if err != nil {
+		t.Fatalf("decode from the wire: %v", err)
+	}
+	return cfg
+}
+
+// The web UI reads this, and the settings page and the raw-YAML editor
+// have to address the same fields by the same names. Two things are
+// pinned here: the names are the file's, and a duration is a string a
+// person can read.
+//
+// The alternative, which is what Go produces if left alone, is the
+// field names of the Go structs and durations as nanosecond counts —
+// two naming conventions in one response, and a unit that reads as
+// milliseconds to anyone who does not already know better. A duration
+// as an integer is precisely the ambiguity this project set out to be
+// rid of.
+func TestTheConfigurationIsSpokenInTheShapeOfTheFile(t *testing.T) {
+	h := start(t, func(o *api.Options) {
+		o.Configs = configs(t, func(cfg *config.Config) {
+			cfg.Logging.MaxAge = 168 * time.Hour
+			cfg.MCPServers = map[string]config.MCPServer{
+				"files": server(func(s *config.MCPServer) { s.Timeout = 90 * time.Second }),
+			}
+		})
+	})
+
+	var body struct {
+		Config map[string]any `json:"config"`
+	}
+	decode(t, h.get(t, "/api/config"), http.StatusOK, &body)
+
+	logging, ok := body.Config["logging"].(map[string]any)
+	if !ok {
+		t.Fatalf("no \"logging\" section: %+v", body.Config)
+	}
+	if got := logging["maxAge"]; got != "168h0m0s" {
+		t.Errorf("logging.maxAge = %#v, want the string \"168h0m0s\"", got)
+	}
+	// The camelCase name, not Go's MaxSizeMB-style export.
+	if _, present := logging["maxSizeMB"]; !present {
+		t.Errorf("no \"maxSizeMB\" key: %+v", logging)
+	}
+
+	servers, _ := body.Config["mcpServers"].(map[string]any)
+	files, ok := servers["files"].(map[string]any)
+	if !ok {
+		t.Fatalf("no \"mcpServers.files\" section: %+v", body.Config)
+	}
+	if got := files["timeout"]; got != "1m30s" {
+		t.Errorf("mcpServers.files.timeout = %#v, want the string \"1m30s\"", got)
+	}
+	// A field the server does not use is absent rather than null, so the
+	// UI can tell "not set" from "set to nothing".
+	if _, present := files["url"]; present {
+		t.Errorf("a stdio server reports a url: %+v", files)
+	}
+	if _, present := files["headers"]; present {
+		t.Errorf("a stdio server reports headers: %+v", files)
+	}
+}
+
+// The shape has to work in both directions, or the settings page can
+// read the configuration and not save it.
+func TestADurationIsWrittenBackAsItWasRead(t *testing.T) {
+	h := start(t, nil)
+
+	var read struct {
+		Config json.RawMessage `json:"config"`
+	}
+	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
+
+	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{"config": read.Config})
+	decode(t, resp, http.StatusOK, nil)
+
+	if got := h.Configs.Get().Security.ConnectionTimeout; got != 30*time.Second {
+		t.Errorf("connectionTimeout = %v, want it unchanged at 30s", got)
+	}
+}
+
+// A misspelled key is refused rather than ignored. Ignoring it is the
+// worse failure: the setting looks as though it was made, it was not,
+// and nothing says why.
+func TestAnUnknownConfigurationKeyIsRefused(t *testing.T) {
+	h := start(t, nil)
+
+	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{
+		"config": map[string]any{"listen": map[string]any{"prot": 9000}},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if envelope := envelopeOf(t, resp); !contains(envelope.Error.Message, "prot") {
+		t.Errorf("the failure does not name the offending key: %q", envelope.Error.Message)
+	}
 }
 
 // ===== health =====

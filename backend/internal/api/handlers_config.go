@@ -12,7 +12,7 @@ import (
 // handleGetConfig returns the configuration with secrets hidden.
 func (a *API) handleGetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"config": a.opts.Configs.Get().Redact(),
+		"config": wireConfig{a.opts.Configs.Get().Redact()},
 		"path":   a.opts.Configs.Path(),
 	})
 }
@@ -20,7 +20,7 @@ func (a *API) handleGetConfig(c *gin.Context) {
 // handlePutConfig replaces the configuration.
 func (a *API) handlePutConfig(c *gin.Context) {
 	var body struct {
-		Config config.Config `json:"config"`
+		Config wireConfig `json:"config"`
 	}
 	if err := bindJSON(c, &body); err != nil {
 		fail(c, err)
@@ -28,7 +28,7 @@ func (a *API) handlePutConfig(c *gin.Context) {
 	}
 
 	changes, err := a.opts.Configs.Update(func(current *config.Config) error {
-		incoming := restoreSecrets(body.Config, *current)
+		incoming := restoreSecrets(body.Config.Config, *current)
 		if err := incoming.Validate(); err != nil {
 			return err
 		}
@@ -45,8 +45,11 @@ func (a *API) handlePutConfig(c *gin.Context) {
 	a.applyConfig(c)
 
 	c.JSON(http.StatusOK, gin.H{
-		"config":  a.opts.Configs.Get().Redact(),
-		"changes": changes,
+		"config": wireConfig{a.opts.Configs.Get().Redact()},
+		// An empty list rather than null: a client that iterates the
+		// changes should not have to guard against the nothing-changed
+		// case separately.
+		"changes": append(make([]config.Change, 0, len(changes)), changes...),
 	})
 }
 
@@ -129,14 +132,14 @@ func restoreURLCredentials(incoming, existing string) string {
 // edited, rather than only on submission.
 func (a *API) handleValidateConfig(c *gin.Context) {
 	var body struct {
-		Config config.Config `json:"config"`
+		Config wireConfig `json:"config"`
 	}
 	if err := bindJSON(c, &body); err != nil {
 		fail(c, err)
 		return
 	}
 
-	if err := restoreSecrets(body.Config, a.opts.Configs.Get()).Validate(); err != nil {
+	if err := restoreSecrets(body.Config.Config, a.opts.Configs.Get()).Validate(); err != nil {
 		structured := FromValidation("the configuration is not valid", err)
 		c.JSON(http.StatusOK, gin.H{"valid": false, "fields": structured.Fields})
 		return

@@ -42,16 +42,24 @@ type Status struct {
 	// Error explains a failed state. Empty otherwise.
 	Error string `json:"error,omitempty"`
 
-	// LastCheck is when this status was last updated.
-	LastCheck time.Time `json:"lastCheck"`
+	// LastCheck is when this status was last updated. A server that has
+	// never been reached for has no such time, and reports none: the
+	// zero time would otherwise be sent as the year 1, which reads as a
+	// check that happened rather than one that never did.
+	LastCheck time.Time `json:"lastCheck,omitzero"`
 
 	ToolCount     int `json:"toolCount"`
 	ResourceCount int `json:"resourceCount"`
 
 	// PID and StartedAt are set only for transports that run the server
 	// as a child process.
+	//
+	// StartedAt uses omitzero rather than omitempty: a time is a struct,
+	// and omitempty never considers a struct empty, so the field would
+	// otherwise be reported as the year 1 for every server that has no
+	// process — a value a reader has to know to disbelieve.
 	PID       int       `json:"pid,omitempty"`
-	StartedAt time.Time `json:"startedAt,omitempty"`
+	StartedAt time.Time `json:"startedAt,omitzero"`
 
 	// ServerName and ServerVersion come from the handshake and identify
 	// the far side, which is what tells you whether an upgrade landed.
