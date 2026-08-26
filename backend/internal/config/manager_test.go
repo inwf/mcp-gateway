@@ -37,7 +37,7 @@ func TestNewManagerRejectsAnInvalidFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := config.Save(path, func() config.Config {
 		c := config.Default()
-		c.Listen.Port = 0
+		c.Listen.Port = 99999
 		return c
 	}()); err != nil {
 		t.Fatalf("Save: %v", err)

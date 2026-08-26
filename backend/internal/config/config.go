@@ -75,7 +75,10 @@ type Config struct {
 // endpoint, the management API and the web UI.
 type Listen struct {
 	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+
+	// Port is the TCP port to bind. Zero asks the operating system for
+	// any free port, which is reported on startup.
+	Port int `yaml:"port"`
 }
 
 // Logging configures log output and retention. Log files are written
@@ -108,6 +111,18 @@ type Security struct {
 	// AllowedNetworks is a list of CIDR blocks permitted to connect.
 	// An empty list allows every client.
 	AllowedNetworks []string `yaml:"allowedNetworks"`
+
+	// AllowedOrigins names browser origins permitted to open the event
+	// stream, in addition to pages served from this listener.
+	//
+	// A WebSocket handshake is not subject to the cross-origin checks
+	// that guard an ordinary request, so a page on any site the user
+	// visits could otherwise open a connection to their own machine and
+	// read every event. An empty list permits same-origin pages only,
+	// which is what a deployed instance serving its own web UI needs.
+	// Running the frontend from a separate development server is the
+	// case that needs an entry here.
+	AllowedOrigins []string `yaml:"allowedOrigins,omitempty"`
 
 	// MaxConnections caps simultaneously open TCP connections.
 	MaxConnections int `yaml:"maxConnections"`

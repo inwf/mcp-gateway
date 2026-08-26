@@ -2,19 +2,39 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"mcphub/internal/config"
+	"mcphub/internal/testmcp"
 )
 
+// TestMain lets this binary stand in for an upstream MCP server, which
+// is how a test can start a real child process without depending on
+// anything installed on the machine.
+func TestMain(m *testing.M) {
+	if served, code := testmcp.ServeIfRequested(); served {
+		os.Exit(code)
+	}
+	os.Exit(m.Run())
+}
+
 // execute runs the command and returns its exit code and streams.
+//
+// The context is already cancelled: none of these tests exercise
+// serving, and a cancelled context makes it impossible for one to block
+// by accident if it did.
 func execute(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
 	var out, errOut bytes.Buffer
-	code = run(args, &out, &errOut)
+	code = run(ctx, args, &out, &errOut)
 	return code, out.String(), errOut.String()
 }
 
@@ -63,13 +83,28 @@ func TestUnknownFlagIsAUsageError(t *testing.T) {
 	}
 }
 
-func TestUnexpectedPositionalArgumentIsAUsageError(t *testing.T) {
-	code, _, stderr := execute(t, "serve")
+func TestAnUnknownCommandIsAUsageError(t *testing.T) {
+	code, _, stderr := execute(t, "demolish")
 
 	if code != exitUsage {
 		t.Errorf("exit code = %d, want %d", code, exitUsage)
 	}
+	if !strings.Contains(stderr, "demolish") {
+		t.Errorf("stderr %q does not name the unknown command", stderr)
+	}
+	// Naming what is available saves a trip to the help text.
 	if !strings.Contains(stderr, "serve") {
+		t.Errorf("stderr %q does not list the available commands", stderr)
+	}
+}
+
+func TestAnUnexpectedArgumentIsAUsageError(t *testing.T) {
+	code, _, stderr := execute(t, "check", "leftover")
+
+	if code != exitUsage {
+		t.Errorf("exit code = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr, "leftover") {
 		t.Errorf("stderr %q does not name the unexpected argument", stderr)
 	}
 }
@@ -88,7 +123,7 @@ func TestHelpExitsSuccessfully(t *testing.T) {
 func TestRunsWithoutAConfigFile(t *testing.T) {
 	dir := isolated(t)
 
-	code, stdout, stderr := execute(t, "--data-dir", dir)
+	code, stdout, stderr := execute(t, "check", "--data-dir", dir)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
@@ -106,7 +141,7 @@ func TestRunsWithoutAConfigFile(t *testing.T) {
 func TestNoConfigFileIsCreatedOnStartup(t *testing.T) {
 	dir := isolated(t)
 
-	if code, _, stderr := execute(t, "--data-dir", dir); code != exitOK {
+	if code, _, stderr := execute(t, "check", "--data-dir", dir); code != exitOK {
 		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
 	}
 
@@ -128,7 +163,7 @@ func TestReadsAnExistingConfig(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	code, stdout, stderr := execute(t, "--data-dir", dir)
+	code, stdout, stderr := execute(t, "check", "--data-dir", dir)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
@@ -157,7 +192,7 @@ func TestConfigFlagOverridesTheDerivedPath(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	code, stdout, stderr := execute(t, "--data-dir", dir, "--config", elsewhere)
+	code, stdout, stderr := execute(t, "check", "--data-dir", dir, "--config", elsewhere)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
@@ -174,7 +209,7 @@ func TestDataDirEnvironmentVariableIsUsed(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(config.DataDirEnv, dir)
 
-	code, stdout, stderr := execute(t)
+	code, stdout, stderr := execute(t, "check")
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
@@ -188,7 +223,7 @@ func TestDataDirFlagBeatsTheEnvironment(t *testing.T) {
 	fromFlag := t.TempDir()
 	t.Setenv(config.DataDirEnv, t.TempDir())
 
-	code, stdout, stderr := execute(t, "--data-dir", fromFlag)
+	code, stdout, stderr := execute(t, "check", "--data-dir", fromFlag)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
@@ -205,7 +240,7 @@ func TestDefaultDataDirIsInTheWorkingDirectory(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
 
-	code, stdout, stderr := execute(t)
+	code, stdout, stderr := execute(t, "check")
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
@@ -221,7 +256,7 @@ func TestDefaultDataDirIsInTheWorkingDirectory(t *testing.T) {
 func TestEveryReportedPathIsInsideTheDataDir(t *testing.T) {
 	dir := isolated(t)
 
-	code, stdout, stderr := execute(t, "--data-dir", dir)
+	code, stdout, stderr := execute(t, "check", "--data-dir", dir)
 	if code != exitOK {
 		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
 	}
@@ -245,7 +280,7 @@ func TestEveryReportedPathIsInsideTheDataDir(t *testing.T) {
 func TestLogDirectoryIsCreated(t *testing.T) {
 	dir := isolated(t)
 
-	if code, _, stderr := execute(t, "--data-dir", dir); code != exitOK {
+	if code, _, stderr := execute(t, "check", "--data-dir", dir); code != exitOK {
 		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
 	}
 
@@ -263,7 +298,7 @@ func TestLogDirectoryIsCreated(t *testing.T) {
 func TestStartupIsRecordedInTheLogFile(t *testing.T) {
 	dir := isolated(t)
 
-	if code, _, stderr := execute(t, "--data-dir", dir); code != exitOK {
+	if code, _, stderr := execute(t, "check", "--data-dir", dir); code != exitOK {
 		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
 	}
 
@@ -281,7 +316,7 @@ func TestStartupIsRecordedInTheLogFile(t *testing.T) {
 func TestReportIsNotPollutedByLogOutput(t *testing.T) {
 	dir := isolated(t)
 
-	code, stdout, _ := execute(t, "--data-dir", dir)
+	code, stdout, _ := execute(t, "check", "--data-dir", dir)
 	if code != exitOK {
 		t.Fatalf("exit code = %d", code)
 	}
@@ -297,7 +332,7 @@ func TestInvalidConfigIsRejectedWithTheFieldNamed(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	code, _, stderr := execute(t, "--data-dir", dir)
+	code, _, stderr := execute(t, "check", "--data-dir", dir)
 
 	if code != exitFailure {
 		t.Errorf("exit code = %d, want %d", code, exitFailure)
@@ -314,7 +349,7 @@ func TestMalformedConfigIsRejectedWithTheLineNumber(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	code, _, stderr := execute(t, "--data-dir", dir)
+	code, _, stderr := execute(t, "check", "--data-dir", dir)
 
 	if code != exitFailure {
 		t.Errorf("exit code = %d, want %d", code, exitFailure)
@@ -330,7 +365,7 @@ func TestMissingExplicitConfigStillFallsBackToDefaults(t *testing.T) {
 	dir := isolated(t)
 	missing := filepath.Join(t.TempDir(), "nope.yaml")
 
-	code, stdout, stderr := execute(t, "--data-dir", dir, "--config", missing)
+	code, stdout, stderr := execute(t, "check", "--data-dir", dir, "--config", missing)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)

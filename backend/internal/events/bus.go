@@ -32,6 +32,21 @@ const (
 	ToolCallFailed    Kind = "toolcall.failed"
 )
 
+// Kinds lists every kind, for a client that wants to name what it is
+// unsubscribing from and for validating a subscription request.
+var Kinds = []Kind{
+	ServerConnected,
+	ServerDisconnected,
+	ServerStatus,
+	ServerFailed,
+	ToolsChanged,
+	ResourcesChanged,
+	ConfigUpdated,
+	ToolCallStarted,
+	ToolCallCompleted,
+	ToolCallFailed,
+}
+
 // Event is one notification.
 type Event struct {
 	Kind Kind      `json:"kind"`

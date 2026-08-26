@@ -4,17 +4,35 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"mcphub/internal/config"
 	"mcphub/internal/logging"
 )
+
+// resolveConfigPath decides which configuration file to read, as an
+// absolute path so that a later change of working directory cannot
+// silently point at a different file.
+func resolveConfigPath(paths config.Paths, configFlag string) (string, error) {
+	if configFlag == "" {
+		return paths.ConfigFile(), nil
+	}
+	absolute, err := filepath.Abs(configFlag)
+	if err != nil {
+		return "", fmt.Errorf("resolve config path %q: %w", configFlag, err)
+	}
+	return absolute, nil
+}
 
 // version is the human-readable release version. Plain `go build` already
 // stamps the git revision into the binary (readable via runtime/debug), so
@@ -31,13 +49,27 @@ const (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	// The context ends on the first interrupt, which is what starts an
+	// orderly shutdown. A second interrupt is left to the default
+	// handler, so an operator can always force the point.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // run holds everything main does, so that it can be exercised by a test
 // without spawning a process or capturing the real standard streams.
-func run(args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("mcphub", flag.ContinueOnError)
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	// A bare subcommand is peeled off before the flags, which is what
+	// lets "mcphub serve --data-dir x" read naturally. The command tree
+	// is small enough not to need a library for it yet.
+	command := "serve"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		command, args = args[0], args[1:]
+	}
+
+	flags := flag.NewFlagSet("mcphub "+command, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
 	dataDir := flags.String("data-dir", "",
@@ -58,16 +90,35 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	if *showVersion {
+	if *showVersion || command == "version" {
 		fmt.Fprintf(stdout, "mcphub %s\n", version)
 		return exitOK
 	}
 
-	if err := selfCheck(*dataDir, *configPath, stdout); err != nil {
-		fmt.Fprintf(stderr, "mcphub: %v\n", err)
-		return exitFailure
+	switch command {
+	case "serve":
+		err := serve(ctx, serveOptions{
+			DataDir:    *dataDir,
+			ConfigPath: *configPath,
+			WebUI:      webUI(),
+		}, stdout, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "mcphub: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+
+	case "check":
+		if err := selfCheck(*dataDir, *configPath, stdout); err != nil {
+			fmt.Fprintf(stderr, "mcphub: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+
+	default:
+		fmt.Fprintf(stderr, "mcphub: unknown command %q; try serve, check or version\n", command)
+		return exitUsage
 	}
-	return exitOK
 }
 
 // selfCheck performs the startup sequence up to the point of listening:
@@ -85,11 +136,9 @@ func selfCheck(dataDirFlag, configFlag string, stdout io.Writer) error {
 		return err
 	}
 
-	cfgPath := configFlag
-	if cfgPath == "" {
-		cfgPath = paths.ConfigFile()
-	} else if cfgPath, err = filepath.Abs(cfgPath); err != nil {
-		return fmt.Errorf("resolve config path %q: %w", configFlag, err)
+	cfgPath, err := resolveConfigPath(paths, configFlag)
+	if err != nil {
+		return err
 	}
 
 	cfg, err := config.Load(cfgPath)

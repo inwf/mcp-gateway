@@ -80,7 +80,6 @@ func TestValidateTopLevelRules(t *testing.T) {
 		{"empty host", func(c *config.Config) { c.Listen.Host = "" }, "listen.host"},
 		{"host with scheme", func(c *config.Config) { c.Listen.Host = "http://127.0.0.1" }, "listen.host"},
 		{"host with port", func(c *config.Config) { c.Listen.Host = "127.0.0.1:7788" }, "listen.host"},
-		{"port zero", func(c *config.Config) { c.Listen.Port = 0 }, "listen.port"},
 		{"port too large", func(c *config.Config) { c.Listen.Port = 70000 }, "listen.port"},
 		{"port negative", func(c *config.Config) { c.Listen.Port = -1 }, "listen.port"},
 
@@ -173,6 +172,7 @@ func TestValidateAcceptsMeaningfulEdgeValues(t *testing.T) {
 		{"hostname as listen address", func(c *config.Config) { c.Listen.Host = "localhost" }},
 		{"wildcard as listen address", func(c *config.Config) { c.Listen.Host = "0.0.0.0" }},
 		{"IPv6 as listen address", func(c *config.Config) { c.Listen.Host = "::1" }},
+		{"port zero asks for any free port", func(c *config.Config) { c.Listen.Port = 0 }},
 	}
 
 	for _, tt := range tests {
@@ -321,7 +321,7 @@ func TestValidateServerNames(t *testing.T) {
 // file reports everything wrong with it.
 func TestValidateReportsEveryProblemAtOnce(t *testing.T) {
 	cfg := config.Default()
-	cfg.Listen.Port = 0
+	cfg.Listen.Port = 99999
 	cfg.Logging.Level = "verbose"
 	cfg.Gateway.DefaultSessionMode = "sticky"
 	cfg.MCPServers = map[string]config.MCPServer{
@@ -373,7 +373,7 @@ func TestValidateReportsServersInStableOrder(t *testing.T) {
 func TestValidationErrorMessage(t *testing.T) {
 	t.Run("single problem reads as one line", func(t *testing.T) {
 		cfg := config.Default()
-		cfg.Listen.Port = 0
+		cfg.Listen.Port = 99999
 
 		msg := cfg.Validate().Error()
 		if strings.Contains(msg, "\n") {
@@ -386,7 +386,7 @@ func TestValidationErrorMessage(t *testing.T) {
 
 	t.Run("several problems are listed with a count", func(t *testing.T) {
 		cfg := config.Default()
-		cfg.Listen.Port = 0
+		cfg.Listen.Port = 99999
 		cfg.Logging.Level = "verbose"
 
 		msg := cfg.Validate().Error()

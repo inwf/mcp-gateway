@@ -1,0 +1,226 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"mcphub/internal/api"
+	"mcphub/internal/config"
+	"mcphub/internal/events"
+	"mcphub/internal/gateway"
+	"mcphub/internal/logging"
+	"mcphub/internal/upstream"
+)
+
+// shutdownGrace is how long in-flight requests have to finish once the
+// listener has stopped accepting.
+//
+// It is deliberately short. The requests that would take longer are the
+// long-lived streams, and those are severed on purpose rather than
+// waited for: an MCP notification stream never becomes idle, so waiting
+// for one means waiting for the whole grace period every time.
+const shutdownGrace = 5 * time.Second
+
+// serveOptions is what the serve command was asked to do.
+type serveOptions struct {
+	DataDir    string
+	ConfigPath string
+
+	// WebUI is the built frontend, when one is embedded.
+	WebUI fs.FS
+
+	// Ready is called with the address actually being listened on. Tests
+	// use it to find a listener bound to port zero.
+	Ready func(addr string)
+}
+
+// serve runs the gateway until ctx is cancelled, then shuts down.
+func serve(ctx context.Context, opts serveOptions, stdout, stderr io.Writer) error {
+	paths, cfgPath, cfg, err := resolve(opts.DataDir, opts.ConfigPath)
+	if err != nil {
+		return err
+	}
+
+	store := logging.NewStore(logging.DefaultCapacity)
+	logOpts, err := logging.OptionsFrom(cfg.Logging, paths, store)
+	if err != nil {
+		return err
+	}
+	logOpts.Stdout = stderr
+	log, err := logging.New(logOpts)
+	if err != nil {
+		return err
+	}
+	// Closing the log last is what keeps the shutdown sequence itself
+	// visible in the log file.
+	defer log.Close()
+
+	cli := log.For(logging.ModuleCLI)
+	cli.Info("starting", "version", version, "config", cfgPath, "dataDir", paths.Root())
+
+	// The router's own debug mode prints a route table and a banner to
+	// standard output on every start. Which mode to run in is the
+	// binary's decision, not the API package's, so it is made here.
+	gin.SetMode(gin.ReleaseMode)
+
+	bus := events.NewBus()
+	defer bus.Close()
+
+	ups := upstream.NewManager(version, log, bus)
+	ups.Apply(cfg)
+
+	configs, err := config.NewManager(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	g := gateway.New(gateway.Options{
+		Version:   version,
+		Upstreams: ups,
+		Configs:   configs,
+		Logger:    log.For(logging.ModuleGateway),
+		Gateway:   cfg.Gateway,
+		WireDebug: cfg.Logging.MCPWireDebug,
+	})
+	g.Sync()
+	g.Watch(ctx, bus)
+
+	served, err := api.New(api.Options{
+		Version:   version,
+		Logger:    log.For(logging.ModuleAPI),
+		Security:  cfg.Security,
+		MCP:       g.Handler(),
+		Configs:   configs,
+		Upstreams: ups,
+		Gateway:   g,
+		Logs:      store,
+		Bus:       bus,
+		WebUI:     opts.WebUI,
+	})
+	if err != nil {
+		return err
+	}
+
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Listen.Host, cfg.Listen.Port))
+	if err != nil {
+		return fmt.Errorf("listen on %s:%d: %w", cfg.Listen.Host, cfg.Listen.Port, err)
+	}
+	listener = served.Listen(listener)
+
+	httpServer := &http.Server{
+		Handler: served.Handler(),
+		// A long-lived stream must not be severed by a read timeout, so
+		// only the header read is bounded. The connection limit and the
+		// idle timeout are what bound a connection that goes quiet.
+		ReadHeaderTimeout: cfg.Security.ConnectionTimeout,
+		IdleTimeout:       cfg.Security.IdleConnectionTimeout,
+	}
+
+	// Connecting happens in the background: a slow upstream must not hold
+	// up the endpoint. A client that connects first sees no tools and is
+	// told when they arrive, which is what the notification is for.
+	go func() {
+		ups.ConnectAll(ctx, cfg.Startup)
+		g.Sync()
+	}()
+
+	addr := listener.Addr().String()
+	cli.Info("listening", "addr", addr, "servers", len(cfg.MCPServers))
+	fmt.Fprintf(stdout, "mcphub %s listening on http://%s\n", version, addr)
+	if opts.Ready != nil {
+		opts.Ready(addr)
+	}
+
+	failed := make(chan error, 1)
+	go func() {
+		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			failed <- err
+		}
+		close(failed)
+	}()
+
+	select {
+	case err, bad := <-failed:
+		if bad {
+			return fmt.Errorf("serve: %w", err)
+		}
+		// The server stopped on its own without an error, which only
+		// happens if something else closed it.
+		return nil
+	case <-ctx.Done():
+		cli.Info("shutting down")
+		fmt.Fprintln(stdout, "shutting down")
+	}
+
+	shutdown(cli, served, httpServer, ups)
+	return nil
+}
+
+// shutdown stops serving and releases everything, in the one order that
+// works.
+func shutdown(log *slog.Logger, served *api.API, httpServer *http.Server, ups *upstream.Manager) {
+	// The event-stream clients go first. They are hijacked connections
+	// that the HTTP server does not track, so nothing else would ever
+	// close them.
+	served.Close()
+
+	// Then stop accepting and let ordinary requests finish. A long-lived
+	// MCP stream never becomes idle, so this is expected to reach its
+	// deadline whenever one is open; Close then severs what is left.
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+
+	if err := httpServer.Shutdown(ctx); err != nil {
+		log.Debug("some connections were still open at the deadline", "error", err)
+		_ = httpServer.Close()
+	}
+
+	// Last, the child processes. Doing this before the HTTP server was
+	// down would fail in-flight tool calls that could still have
+	// succeeded.
+	ups.CloseAll()
+	log.Info("stopped")
+}
+
+// resolve works out where everything lives and loads the configuration.
+func resolve(dataDirFlag, configFlag string) (config.Paths, string, config.Config, error) {
+	paths, err := config.ResolveDataDir(dataDirFlag)
+	if err != nil {
+		return config.Paths{}, "", config.Config{}, err
+	}
+	if err := paths.Ensure(); err != nil {
+		return config.Paths{}, "", config.Config{}, err
+	}
+
+	cfgPath, err := resolveConfigPath(paths, configFlag)
+	if err != nil {
+		return config.Paths{}, "", config.Config{}, err
+	}
+
+	cfg, err := config.LoadOrDefault(cfgPath)
+	if err != nil {
+		return config.Paths{}, "", config.Config{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return config.Paths{}, "", config.Config{}, fmt.Errorf("%s: %w", cfgPath, err)
+	}
+
+	// The configuration manager needs a file to write back to, so one is
+	// created from the defaults if it is missing.
+	if _, statErr := config.Load(cfgPath); errors.Is(statErr, fs.ErrNotExist) {
+		if err := config.Save(cfgPath, cfg); err != nil {
+			return config.Paths{}, "", config.Config{}, fmt.Errorf("write the initial configuration: %w", err)
+		}
+	}
+
+	return paths, cfgPath, cfg, nil
+}

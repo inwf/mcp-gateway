@@ -9,14 +9,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"mcphub/internal/config"
+	"mcphub/internal/events"
 	"mcphub/internal/gateway"
 	"mcphub/internal/logging"
 	"mcphub/internal/upstream"
@@ -65,6 +68,17 @@ type Options struct {
 	// Logs is the in-memory log view the log endpoints query.
 	Logs *logging.Store
 
+	// Bus carries the events the WebSocket stream forwards to browsers.
+	// A nil bus leaves the endpoint serving clients that receive
+	// nothing, which is what a test of the routing layer alone wants.
+	Bus *events.Bus
+
+	// WebUI holds the built frontend. A nil file system, or one with no
+	// entry document, leaves paths outside the API reporting that no web
+	// interface is available — which is what a backend-only build and a
+	// development tree with an unbuilt frontend both are.
+	WebUI fs.FS
+
 	// Now overrides the clock, for tests that assert on uptime.
 	Now func() time.Time
 }
@@ -79,6 +93,12 @@ type API struct {
 	// connections is set when a connection limit is in force, so that the
 	// health endpoint can report the count.
 	connections *limitedListener
+
+	// hub fans bus events out to the connected browsers.
+	hub *hub
+
+	// web serves the frontend when one is embedded.
+	web *staticFiles
 }
 
 // New builds the API. It fails if the security configuration cannot be
@@ -102,12 +122,26 @@ func New(opts Options) (*API, error) {
 	}
 
 	a := &API{opts: opts, log: opts.Logger, started: opts.Now()}
+	a.hub = newHub(opts.Logger.With(logging.AttrModule, logging.ModuleWS))
+	a.hub.watch(opts.Bus)
+	if web, present := newStaticFiles(opts.WebUI); present {
+		a.web = web
+	}
 	a.engine = a.buildEngine(list)
 	return a, nil
 }
 
 // Handler serves every route.
 func (a *API) Handler() http.Handler { return a.engine }
+
+// Close disconnects every event-stream client and stops watching the
+// bus. The HTTP server is shut down separately by whoever owns it.
+func (a *API) Close() {
+	a.hub.close()
+}
+
+// WatchingClients is how many browsers are receiving events.
+func (a *API) WatchingClients() int { return a.hub.count() }
 
 // Listen wraps a listener with the configured connection limit.
 //
@@ -158,6 +192,11 @@ func (a *API) buildEngine(list *allowlist) *gin.Engine {
 	)
 
 	a.mountMCP(engine)
+
+	// The event stream is mounted alongside the MCP endpoint rather than
+	// under the API prefix, for the same reason: it is a long-lived
+	// connection and must not consume a concurrent-request slot.
+	engine.GET(WSPath, a.handleWS)
 
 	// The concurrency limit applies to the management API only; see
 	// concurrencyMiddleware for why streams are excluded.
@@ -217,13 +256,21 @@ func (a *API) registerRoutes(api gin.IRoutes) {
 	api.DELETE("/logs", a.handleClearLogs)
 }
 
-// handleNoRoute reports an unmatched path.
+// handleNoRoute reports an unmatched path, or hands it to the web UI.
 //
-// Once the web UI is served from this listener, a path outside the API
-// will fall through to the single-page app instead. An API path must
-// keep reporting JSON, since a client parsing HTML as an error envelope
-// gets a confusing parse failure instead of the actual 404.
+// An API path always reports JSON: a client parsing HTML where it
+// expected an error envelope gets a confusing decode failure instead of
+// the status that actually happened. Everything else belongs to the
+// single-page app, which owns its own routing.
 func (a *API) handleNoRoute(c *gin.Context) {
+	isAPI := c.Request.URL.Path == APIPrefix ||
+		strings.HasPrefix(c.Request.URL.Path, APIPrefix+"/")
+
+	if !isAPI && a.web != nil && c.Request.Method == http.MethodGet {
+		a.web.serve(c)
+		return
+	}
+
 	fail(c, &Error{
 		Code:    CodeNotFound,
 		Message: fmt.Sprintf("no route for %s %s", c.Request.Method, c.Request.URL.Path),

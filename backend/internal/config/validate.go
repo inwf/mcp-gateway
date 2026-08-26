@@ -88,8 +88,13 @@ func (c Config) validateListen(v *validator) {
 		v.add("listen.host", "looks like it includes a port; set listen.port instead")
 	}
 
-	if c.Listen.Port < 1 || c.Listen.Port > 65535 {
-		v.add("listen.port", "is %d, want 1-65535", c.Listen.Port)
+	// Port zero asks the operating system for any free port. It is
+	// unusual for a gateway, whose clients need a known address, but it
+	// is the standard way to say "pick one" and the chosen port is
+	// reported on startup. Omitting the key gets the default rather than
+	// zero, so this cannot mask a forgotten setting.
+	if c.Listen.Port < 0 || c.Listen.Port > 65535 {
+		v.add("listen.port", "is %d, want 0-65535 (0 asks for any free port)", c.Listen.Port)
 	}
 }
 
