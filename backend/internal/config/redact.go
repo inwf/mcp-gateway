@@ -9,6 +9,15 @@ import (
 // length-preserving mask so that nothing about the original leaks.
 const RedactedValue = "[redacted]"
 
+// RedactedURLUser replaces the credentials embedded in a URL.
+//
+// It differs from [RedactedValue] because the userinfo component of a
+// URL is percent-encoded when the URL is reassembled, which would turn
+// the brackets into "%5B" and "%5D" and show a settings form something
+// unreadable. The marker still round-trips: a URL sent back with this
+// username means the credentials were not changed.
+const RedactedURLUser = "redacted"
+
 // secretKeyHints are matched case-insensitively against the *name* of an
 // environment variable or header. Matching the name rather than the
 // value keeps ordinary settings readable in the UI and in change logs,
@@ -93,6 +102,6 @@ func redactURLCredentials(raw string) string {
 		// rewriting it would corrupt whatever the user typed.
 		return raw
 	}
-	u.User = url.User(RedactedValue)
+	u.User = url.User(RedactedURLUser)
 	return u.String()
 }

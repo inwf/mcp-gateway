@@ -55,6 +55,10 @@ type Gateway struct {
 	// fingerprint of each entry, so that a resync only touches what
 	// actually changed.
 	registered map[string]string
+	// published is the forwarded tool set as last synced, kept so that
+	// the management API can report what is on offer. The SDK's server
+	// does not enumerate its own tools.
+	published []*mcp.Tool
 	// publishedResources records the resource URIs currently on the
 	// server, for the same reason.
 	publishedResources map[string]string
@@ -140,6 +144,18 @@ func (g *Gateway) Handler() http.Handler {
 // Sessions lists the clients currently connected.
 func (g *Gateway) Sessions() []SessionInfo { return sessionsOf(g.server) }
 
+// PublishedTools lists the upstream tools currently on offer, under the
+// names clients see them by.
+//
+// This covers the forwarded tools only. The gateway's own tools are
+// registered once and never change, and are listed by
+// [SystemToolNames].
+func (g *Gateway) PublishedTools() []*mcp.Tool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return slices.Clone(g.published)
+}
+
 // Watch keeps the exposed tools in step with the upstream servers until
 // the context ends.
 func (g *Gateway) Watch(ctx context.Context, bus *events.Bus) {
@@ -189,6 +205,7 @@ func (g *Gateway) Sync() {
 	previous := g.registered
 	g.names = aggregate.Names
 	g.registered = current
+	g.published = aggregate.Tools
 	g.mu.Unlock()
 
 	var removed []string

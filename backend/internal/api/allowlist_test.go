@@ -31,6 +31,8 @@ func router(t *testing.T, networks []string) (http.Handler, *logging.Store) {
 		Version:  "test",
 		Logger:   log.For(logging.ModuleAPI),
 		Security: security,
+		Configs:  configs(t, nil),
+		Logs:     store,
 	})
 	if err != nil {
 		t.Fatalf("build the api: %v", err)
@@ -172,7 +174,7 @@ func TestAMalformedNetworkIsRefusedAtStartup(t *testing.T) {
 	security := config.Default().Security
 	security.AllowedNetworks = []string{"127.0.0.0/8", "not-a-network"}
 
-	_, err := api.New(api.Options{Version: "test", Security: security})
+	_, err := api.New(api.Options{Version: "test", Security: security, Configs: configs(t, nil)})
 	if err == nil {
 		t.Fatal("New accepted a malformed allowed network")
 	}

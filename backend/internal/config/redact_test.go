@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -146,6 +147,57 @@ func TestRedactHidesSecretValues(t *testing.T) {
 			t.Errorf("proxy = %q, still contains the password", got.Proxy)
 		}
 	})
+}
+
+// A redacted URL is shown in the settings form and sent back from it, so
+// the marker has to survive being reassembled into a URL as something a
+// person can read. A marker containing characters that need
+// percent-encoding would arrive as "%5Bredacted%5D".
+func TestARedactedURLStaysReadable(t *testing.T) {
+	cfg := config.Default()
+	cfg.MCPServers = map[string]config.MCPServer{
+		"srv": {
+			Transport: config.TransportStreamableHTTP,
+			URL:       "https://user:hunter2@example.com/mcp",
+			Proxy:     "http://proxyuser:proxypass@127.0.0.1:8080",
+		},
+	}
+
+	got := cfg.Redact().MCPServers["srv"]
+	for name, value := range map[string]string{"url": got.URL, "proxy": got.Proxy} {
+		if strings.Contains(value, "%") {
+			t.Errorf("%s = %q, want no percent-encoding in the marker", name, value)
+		}
+		if !strings.Contains(value, config.RedactedURLUser) {
+			t.Errorf("%s = %q, want it to carry %q", name, value, config.RedactedURLUser)
+		}
+	}
+}
+
+// The marker is what tells a write endpoint the credentials were not
+// changed, so parsing a redacted URL has to yield it back exactly.
+func TestARedactedURLReportsTheMarkerWhenParsed(t *testing.T) {
+	cfg := config.Default()
+	cfg.MCPServers = map[string]config.MCPServer{
+		"srv": {
+			Transport: config.TransportStreamableHTTP,
+			URL:       "https://user:hunter2@example.com/mcp",
+		},
+	}
+
+	parsed, err := url.Parse(cfg.Redact().MCPServers["srv"].URL)
+	if err != nil {
+		t.Fatalf("the redacted url does not parse: %v", err)
+	}
+	if parsed.User == nil {
+		t.Fatal("the redacted url carries no userinfo")
+	}
+	if got := parsed.User.Username(); got != config.RedactedURLUser {
+		t.Errorf("username = %q, want %q", got, config.RedactedURLUser)
+	}
+	if _, hasPassword := parsed.User.Password(); hasPassword {
+		t.Error("the redacted url still carries a password")
+	}
 }
 
 // Redacting is for display. It must not damage the configuration it was

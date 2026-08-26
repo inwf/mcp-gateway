@@ -2,6 +2,7 @@ package logging_test
 
 import (
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -194,6 +195,47 @@ func TestClear(t *testing.T) {
 			t.Errorf("global view still has %v", messages(got))
 		}
 	})
+}
+
+// Clearing one server has to remove its records from the shared view as
+// well as from its own. If they lingered there, clearing a server's log
+// in the UI would look like it had done nothing the moment the view was
+// switched back to all servers.
+func TestClearingOneServerAlsoClearsItFromTheGlobalView(t *testing.T) {
+	store := logging.NewStore(10)
+	store.Append(entry(time.Now(), slog.LevelInfo, "from one", logging.ModuleUpstream, "one"))
+	store.Append(entry(time.Now(), slog.LevelInfo, "from two", logging.ModuleUpstream, "two"))
+	store.Append(entry(time.Now(), slog.LevelInfo, "from nowhere", logging.ModuleAPI, ""))
+
+	store.Clear("one")
+
+	got := messages(store.Query(logging.Query{}))
+	for _, unwanted := range []string{"from one"} {
+		if slices.Contains(got, unwanted) {
+			t.Errorf("the global view still has %q: %v", unwanted, got)
+		}
+	}
+	// Everything else survives, including records tied to no server.
+	for _, wanted := range []string{"from two", "from nowhere"} {
+		if !slices.Contains(got, wanted) {
+			t.Errorf("clearing one server also dropped %q: %v", wanted, got)
+		}
+	}
+}
+
+// The order of what remains is what a log view reads top to bottom.
+func TestClearingOneServerKeepsTheOrderOfTheRest(t *testing.T) {
+	store := logging.NewStore(10)
+	base := time.Now()
+	store.Append(entry(base, slog.LevelInfo, "first", logging.ModuleAPI, ""))
+	store.Append(entry(base.Add(time.Millisecond), slog.LevelInfo, "noise", logging.ModuleUpstream, "chatty"))
+	store.Append(entry(base.Add(2*time.Millisecond), slog.LevelInfo, "second", logging.ModuleAPI, ""))
+
+	store.Clear("chatty")
+
+	if got := messages(store.Query(logging.Query{})); !equal(got, []string{"first", "second"}) {
+		t.Errorf("remaining entries = %v, want them in their original order", got)
+	}
 }
 
 func TestServersLists(t *testing.T) {

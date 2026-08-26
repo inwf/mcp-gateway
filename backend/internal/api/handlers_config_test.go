@@ -1,0 +1,277 @@
+package api_test
+
+import (
+	"net/http"
+	"testing"
+
+	"mcphub/internal/api"
+	"mcphub/internal/config"
+)
+
+// server builds a valid server definition, starting from the defaults so
+// that a test only states what it actually cares about.
+func server(adjust func(*config.MCPServer)) config.MCPServer {
+	s := config.DefaultMCPServer()
+	s.Transport = config.TransportStdio
+	s.Command = "echo"
+	if adjust != nil {
+		adjust(&s)
+	}
+	return s
+}
+
+// withSecrets is a configuration carrying values worth hiding.
+func withSecrets(cfg *config.Config) {
+	cfg.MCPServers = map[string]config.MCPServer{
+		"files": server(func(s *config.MCPServer) {
+			s.Env = map[string]string{
+				"API_TOKEN": "the-real-token",
+				"LOG_LEVEL": "debug",
+			}
+		}),
+	}
+}
+
+type configResponse struct {
+	Config config.Config `json:"config"`
+	Path   string        `json:"path"`
+}
+
+// ===== reading =====
+
+func TestReadingTheConfigurationHidesSecrets(t *testing.T) {
+	h := start(t, func(o *api.Options) { o.Configs = configs(t, withSecrets) })
+
+	var got configResponse
+	decode(t, h.get(t, "/api/config"), http.StatusOK, &got)
+
+	env := got.Config.MCPServers["files"].Env
+	if env["API_TOKEN"] != config.RedactedValue {
+		t.Errorf("API_TOKEN = %q, want it hidden", env["API_TOKEN"])
+	}
+	// An ordinary setting stays readable, or the settings page becomes
+	// useless.
+	if env["LOG_LEVEL"] != "debug" {
+		t.Errorf("LOG_LEVEL = %q, want it readable", env["LOG_LEVEL"])
+	}
+	if got.Path == "" {
+		t.Error("the response does not say where the configuration lives")
+	}
+}
+
+// ===== writing =====
+
+// This is the one that would destroy data. The configuration is handed
+// out with secrets hidden; a settings page that reads it, changes one
+// field and sends the whole thing back must not overwrite every
+// credential with the placeholder text — which is unrecoverable, since
+// the file has already been rewritten.
+func TestSavingBackARedactedConfigurationKeepsTheSecrets(t *testing.T) {
+	h := start(t, func(o *api.Options) { o.Configs = configs(t, withSecrets) })
+
+	var read configResponse
+	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
+
+	// Change something unrelated, exactly as a settings form would.
+	edited := read.Config
+	edited.Logging.Level = config.LevelWarn
+
+	decode(t, h.do(t, http.MethodPut, "/api/config", map[string]any{"config": edited}),
+		http.StatusOK, nil)
+
+	stored := h.Configs.Get()
+	if got := stored.MCPServers["files"].Env["API_TOKEN"]; got != "the-real-token" {
+		t.Errorf("API_TOKEN = %q, want the original secret to survive", got)
+	}
+	if stored.Logging.Level != config.LevelWarn {
+		t.Errorf("logging level = %q, want the edit to have been applied", stored.Logging.Level)
+	}
+}
+
+// Changing a secret has to actually change it, or a rotated credential
+// would silently keep the old value.
+func TestANewSecretReplacesTheOldOne(t *testing.T) {
+	h := start(t, func(o *api.Options) { o.Configs = configs(t, withSecrets) })
+
+	var read configResponse
+	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
+
+	edited := read.Config
+	server := edited.MCPServers["files"]
+	server.Env = map[string]string{"API_TOKEN": "the-rotated-token", "LOG_LEVEL": "debug"}
+	edited.MCPServers["files"] = server
+
+	decode(t, h.do(t, http.MethodPut, "/api/config", map[string]any{"config": edited}),
+		http.StatusOK, nil)
+
+	if got := h.Configs.Get().MCPServers["files"].Env["API_TOKEN"]; got != "the-rotated-token" {
+		t.Errorf("API_TOKEN = %q, want the new secret", got)
+	}
+}
+
+// Credentials in a URL are hidden the same way, so they have to be
+// restored the same way.
+func TestURLCredentialsSurviveARoundTrip(t *testing.T) {
+	h := start(t, func(o *api.Options) {
+		o.Configs = configs(t, func(cfg *config.Config) {
+			cfg.MCPServers = map[string]config.MCPServer{
+				"remote": server(func(s *config.MCPServer) {
+					s.Transport = config.TransportStreamableHTTP
+					s.Command = ""
+					s.URL = "https://user:hunter2@example.com/mcp"
+				}),
+			}
+		})
+	})
+
+	var read configResponse
+	decode(t, h.get(t, "/api/config"), http.StatusOK, &read)
+
+	if got := read.Config.MCPServers["remote"].URL; !contains(got, config.RedactedURLUser) {
+		t.Fatalf("url = %q, want the credentials hidden", got)
+	}
+
+	decode(t, h.do(t, http.MethodPut, "/api/config", map[string]any{"config": read.Config}),
+		http.StatusOK, nil)
+
+	if got := h.Configs.Get().MCPServers["remote"].URL; got != "https://user:hunter2@example.com/mcp" {
+		t.Errorf("url = %q, want the original credentials to survive", got)
+	}
+}
+
+// A rejected configuration must leave the one in force untouched: half
+// a configuration is worse than the old one.
+func TestAnInvalidConfigurationIsRejectedAndChangesNothing(t *testing.T) {
+	h := start(t, func(o *api.Options) { o.Configs = configs(t, withSecrets) })
+	before := h.Configs.Get()
+
+	broken := before.Clone()
+	broken.Listen.Port = 99999
+
+	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{"config": broken})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+
+	envelope := envelopeOf(t, resp)
+	if len(envelope.Error.Fields) == 0 {
+		t.Error("no field errors were reported, so a form cannot mark the bad input")
+	}
+	var named bool
+	for _, field := range envelope.Error.Fields {
+		if contains(field.Field, "port") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("no field error names the port: %+v", envelope.Error.Fields)
+	}
+
+	if got := h.Configs.Get().Listen.Port; got != before.Listen.Port {
+		t.Errorf("port = %d, want the previous configuration untouched (%d)", got, before.Listen.Port)
+	}
+}
+
+// Every problem at once, so a form can mark all of them rather than
+// making the user fix one, submit, and discover the next.
+func TestEveryProblemIsReportedTogether(t *testing.T) {
+	h := start(t, nil)
+
+	broken := h.Configs.Get().Clone()
+	broken.Listen.Port = -1
+	broken.Logging.Level = "shouting"
+	broken.MCPServers = map[string]config.MCPServer{
+		"no-command": server(func(s *config.MCPServer) { s.Command = "" }),
+	}
+
+	resp := h.do(t, http.MethodPut, "/api/config", map[string]any{"config": broken})
+	envelope := envelopeOf(t, resp)
+
+	if len(envelope.Error.Fields) < 3 {
+		t.Errorf("reported %d problems, want all three: %+v",
+			len(envelope.Error.Fields), envelope.Error.Fields)
+	}
+}
+
+// ===== validation without saving =====
+
+// The settings form checks as the user types, which must not write
+// anything.
+func TestValidatingDoesNotSave(t *testing.T) {
+	h := start(t, nil)
+	before := h.Configs.Get()
+
+	proposed := before.Clone()
+	proposed.Listen.Port = 9999
+
+	var result struct {
+		Valid  bool             `json:"valid"`
+		Fields []api.FieldError `json:"fields"`
+	}
+	decode(t, h.do(t, http.MethodPost, "/api/config/validate",
+		map[string]any{"config": proposed}), http.StatusOK, &result)
+
+	if !result.Valid {
+		t.Errorf("a valid configuration was reported invalid: %+v", result.Fields)
+	}
+	if got := h.Configs.Get().Listen.Port; got != before.Listen.Port {
+		t.Errorf("port = %d; validating wrote the configuration", got)
+	}
+}
+
+func TestValidatingReportsProblemsWithoutSaving(t *testing.T) {
+	h := start(t, nil)
+
+	proposed := h.Configs.Get().Clone()
+	proposed.Listen.Port = 99999
+
+	var result struct {
+		Valid  bool             `json:"valid"`
+		Fields []api.FieldError `json:"fields"`
+	}
+	decode(t, h.do(t, http.MethodPost, "/api/config/validate",
+		map[string]any{"config": proposed}), http.StatusOK, &result)
+
+	if result.Valid {
+		t.Error("an invalid configuration was reported valid")
+	}
+	if len(result.Fields) == 0 {
+		t.Error("no field errors were reported")
+	}
+}
+
+// ===== malformed requests =====
+
+func TestAMalformedBodyIsABadRequest(t *testing.T) {
+	h := start(t, nil)
+
+	resp := h.raw(t, http.MethodPut, "/api/config", "{not json")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if envelopeOf(t, resp).Error.Code != api.CodeBadRequest {
+		t.Error("the failure is not reported as a bad request")
+	}
+}
+
+// A field the server does not know is almost always a typo or a client
+// built against a different version. Accepting it silently would leave
+// the caller believing a setting took effect when it was discarded.
+func TestAnUnknownFieldIsRejected(t *testing.T) {
+	h := start(t, nil)
+
+	resp := h.raw(t, http.MethodPut, "/api/config",
+		`{"config":{"version":1,"listne":{"port":9999}}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for a misspelled field", resp.StatusCode)
+	}
+}
+
+func TestASecondJSONDocumentIsRejected(t *testing.T) {
+	h := start(t, nil)
+
+	resp := h.raw(t, http.MethodPut, "/api/config", `{"config":{}} {"config":{}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}

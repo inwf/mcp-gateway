@@ -35,6 +35,8 @@ func listening(t *testing.T, maxConnections int) (*httptest.Server, *logging.Sto
 		Version:  "test",
 		Logger:   log.For(logging.ModuleAPI),
 		Security: security,
+		Configs:  configs(t, nil),
+		Logs:     store,
 	})
 	if err != nil {
 		t.Fatalf("build the api: %v", err)

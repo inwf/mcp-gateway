@@ -117,10 +117,14 @@ func start(t *testing.T, servers map[string]string) *stack {
 	// directly, so these tests cover the middleware chain and the mount
 	// as well as the protocol.
 	served, err := api.New(api.Options{
-		Version:  "test",
-		Logger:   log.For(logging.ModuleAPI),
-		Security: cfg.Security,
-		MCP:      g.Handler(),
+		Version:   "test",
+		Logger:    log.For(logging.ModuleAPI),
+		Security:  cfg.Security,
+		MCP:       g.Handler(),
+		Configs:   configs,
+		Upstreams: ups,
+		Gateway:   g,
+		Logs:      store,
 	})
 	if err != nil {
 		t.Fatalf("build the api: %v", err)

@@ -1,11 +1,13 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,8 +28,34 @@ func TestMain(m *testing.M) {
 // harness is an API under test together with the log it wrote.
 type harness struct {
 	*httptest.Server
-	Logs *logging.Store
-	API  *api.API
+	Logs    *logging.Store
+	API     *api.API
+	Configs *config.Manager
+}
+
+// configs writes a configuration to a temporary file and opens it.
+//
+// A real manager rather than a stand-in: it is what makes the write
+// endpoints exercise validation, atomic saving and the change log the
+// way a running instance does.
+func configs(t *testing.T, adjust func(*config.Config)) *config.Manager {
+	t.Helper()
+
+	cfg := config.Default()
+	cfg.MCPServers = map[string]config.MCPServer{}
+	if adjust != nil {
+		adjust(&cfg)
+	}
+
+	path := t.TempDir() + "/config.yaml"
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save the configuration: %v", err)
+	}
+	manager, err := config.NewManager(path)
+	if err != nil {
+		t.Fatalf("open the configuration: %v", err)
+	}
+	return manager
 }
 
 // start builds an API and serves it, adjusting the options first.
@@ -45,6 +73,8 @@ func start(t *testing.T, adjust func(*api.Options)) *harness {
 		Version:  "test",
 		Logger:   log.For(logging.ModuleAPI),
 		Security: config.Default().Security,
+		Configs:  configs(t, nil),
+		Logs:     store,
 	}
 	// The default permits loopback only, which is where tests connect
 	// from; a test that cares sets its own.
@@ -62,7 +92,7 @@ func start(t *testing.T, adjust func(*api.Options)) *harness {
 	server.Start()
 	t.Cleanup(server.Close)
 
-	return &harness{Server: server, Logs: store, API: built}
+	return &harness{Server: server, Logs: store, API: built, Configs: opts.Configs}
 }
 
 // get performs a GET and returns the response.
@@ -74,6 +104,74 @@ func (h *harness) get(t *testing.T, path string) *http.Response {
 	}
 	t.Cleanup(func() { resp.Body.Close() })
 	return resp
+}
+
+// do performs a request with an optional JSON body.
+func (h *harness) do(t *testing.T, method, path string, body any) *http.Response {
+	t.Helper()
+
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("encode the body: %v", err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+
+	req, err := http.NewRequest(method, h.URL+path, reader)
+	if err != nil {
+		t.Fatalf("build the request: %v", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := h.Client().Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+// raw performs a request with a literal body, for malformed input that
+// could not be produced by encoding a value.
+func (h *harness) raw(t *testing.T, method, path, body string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(method, h.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build the request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.Client().Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+// decode reads a JSON response into target, failing on an unexpected
+// status.
+func decode(t *testing.T, resp *http.Response, want int, target any) {
+	t.Helper()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read the body: %v", err)
+	}
+	if resp.StatusCode != want {
+		t.Fatalf("status = %d, want %d; body: %s", resp.StatusCode, want, body)
+	}
+	if target == nil {
+		return
+	}
+	if err := json.Unmarshal(body, target); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
 }
 
 // envelopeOf decodes a failed response.

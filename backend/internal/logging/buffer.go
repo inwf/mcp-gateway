@@ -191,6 +191,11 @@ func (s *Store) Query(q Query) []Entry {
 
 // Clear discards the retained records for one server, or every record
 // when server is empty.
+//
+// A server's records are dropped from the shared ring as well as from
+// its own. Leaving them in the shared ring would make clearing one
+// server's log look like it had done nothing as soon as the view was
+// switched back to all servers.
 func (s *Store) Clear(server string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -200,7 +205,18 @@ func (s *Store) Clear(server string) {
 		s.perServer = map[string]*buffer{}
 		return
 	}
+
 	delete(s.perServer, server)
+
+	// Rebuilding preserves the order and the remaining history, which
+	// filtering in place could not.
+	kept := newBuffer(s.capacity)
+	for _, entry := range s.global.all() {
+		if entry.Server != server {
+			kept.append(entry)
+		}
+	}
+	s.global = kept
 }
 
 // Servers lists the servers that have retained records.

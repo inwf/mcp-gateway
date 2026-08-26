@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -16,6 +17,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"mcphub/internal/config"
+	"mcphub/internal/gateway"
+	"mcphub/internal/logging"
+	"mcphub/internal/upstream"
 )
 
 // Route prefixes. These are constants because the middleware that
@@ -41,8 +45,25 @@ type Options struct {
 	Security config.Security
 
 	// MCP serves the aggregated MCP endpoint. It is supplied as a plain
-	// handler so that this package does not depend on the gateway.
+	// handler so that this package does not depend on the gateway for
+	// that route.
 	MCP http.Handler
+
+	// Configs is the configuration in force. It is required: every
+	// management endpoint reads it.
+	Configs *config.Manager
+
+	// Upstreams is the connection manager. A nil manager leaves the
+	// endpoints that need one reporting that it is not running, which is
+	// what a test of the routing layer alone wants.
+	Upstreams *upstream.Manager
+
+	// Gateway is the aggregated MCP server, for reporting its sessions
+	// and the tools it publishes.
+	Gateway *gateway.Gateway
+
+	// Logs is the in-memory log view the log endpoints query.
+	Logs *logging.Store
 
 	// Now overrides the clock, for tests that assert on uptime.
 	Now func() time.Time
@@ -74,6 +95,10 @@ func New(opts Options) (*API, error) {
 	list, err := newAllowlist(opts.Security.AllowedNetworks)
 	if err != nil {
 		return nil, fmt.Errorf("compile the allowed networks: %w", err)
+	}
+
+	if opts.Configs == nil {
+		return nil, errors.New("the api needs a configuration manager")
 	}
 
 	a := &API{opts: opts, log: opts.Logger, started: opts.Now()}
@@ -159,6 +184,37 @@ func (a *API) mountMCP(engine *gin.Engine) {
 // registerRoutes adds the management API.
 func (a *API) registerRoutes(api gin.IRoutes) {
 	api.GET("/health", a.handleHealth)
+
+	// The configuration as a whole.
+	api.GET("/config", a.handleGetConfig)
+	api.PUT("/config", a.handlePutConfig)
+	api.POST("/config/validate", a.handleValidateConfig)
+
+	// Servers, and what each one offers.
+	api.GET("/servers", a.handleListServers)
+	api.POST("/servers", a.handleCreateServer)
+	api.GET("/servers/:name", a.handleGetServer)
+	api.PUT("/servers/:name", a.handleUpdateServer)
+	api.DELETE("/servers/:name", a.handleDeleteServer)
+	api.POST("/servers/:name/connect", a.handleConnectServer)
+	api.POST("/servers/:name/disconnect", a.handleDisconnectServer)
+	api.GET("/servers/:name/tools", a.handleServerTools)
+	api.POST("/servers/:name/tools/:tool/call", a.handleCallServerTool)
+	api.GET("/servers/:name/resources", a.handleServerResources)
+	api.GET("/servers/:name/resource", a.handleReadServerResource)
+
+	// Across every server.
+	api.GET("/tools", a.handleAggregatedTools)
+	api.GET("/resources", a.handleAggregatedResources)
+
+	// What the gateway itself is doing.
+	api.GET("/gateway/status", a.handleGatewayStatus)
+	api.GET("/gateway/sessions", a.handleGatewaySessions)
+	api.GET("/gateway/tools", a.handleGatewayTools)
+
+	// The log view.
+	api.GET("/logs", a.handleQueryLogs)
+	api.DELETE("/logs", a.handleClearLogs)
 }
 
 // handleNoRoute reports an unmatched path.

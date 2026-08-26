@@ -82,6 +82,25 @@ func ParseLevel(level config.LogLevel) (slog.Level, error) {
 	}
 }
 
+// LevelName converts a slog level to a configured level name. It is the
+// inverse of [ParseLevel], for reporting a stored record to a client
+// that should not have to know slog's numbering.
+//
+// Levels between the named ones are reported as the nearest named level
+// at or below them, which is how slog itself describes them.
+func LevelName(level slog.Level) config.LogLevel {
+	switch {
+	case level < slog.LevelInfo:
+		return config.LevelDebug
+	case level < slog.LevelWarn:
+		return config.LevelInfo
+	case level < slog.LevelError:
+		return config.LevelWarn
+	default:
+		return config.LevelError
+	}
+}
+
 // Logger is a configured logger together with the resources it owns.
 type Logger struct {
 	*slog.Logger
