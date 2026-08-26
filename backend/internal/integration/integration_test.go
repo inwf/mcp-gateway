@@ -16,8 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcphub/internal/api"
 	"mcphub/internal/config"
 	"mcphub/internal/events"
 	"mcphub/internal/gateway"
@@ -30,12 +32,21 @@ func TestMain(m *testing.M) {
 	if served, code := testmcp.ServeIfRequested(); served {
 		os.Exit(code)
 	}
+	// gin's debug mode writes route tables to stdout, burying the output.
+	gin.SetMode(gin.TestMode)
 	os.Exit(m.Run())
 }
 
 // stack is a running gateway with its upstream servers connected.
 type stack struct {
-	URL       string
+	// URL is the aggregated MCP endpoint, served through the real
+	// router: every request passes the same middleware a deployed
+	// instance applies.
+	URL string
+
+	// BaseURL is the listener's root, for reaching the management API.
+	BaseURL string
+
 	Gateway   *gateway.Gateway
 	Upstreams *upstream.Manager
 	Configs   *config.Manager
@@ -102,11 +113,27 @@ func start(t *testing.T, servers map[string]string) *stack {
 	g.Sync()
 	g.Watch(ctx, bus)
 
-	httpServer := httptest.NewServer(g.Handler())
+	// The gateway is reached through the real router rather than
+	// directly, so these tests cover the middleware chain and the mount
+	// as well as the protocol.
+	served, err := api.New(api.Options{
+		Version:  "test",
+		Logger:   log.For(logging.ModuleAPI),
+		Security: cfg.Security,
+		MCP:      g.Handler(),
+	})
+	if err != nil {
+		t.Fatalf("build the api: %v", err)
+	}
+
+	httpServer := httptest.NewUnstartedServer(served.Handler())
+	httpServer.Listener = served.Listen(httpServer.Listener)
+	httpServer.Start()
 	t.Cleanup(httpServer.Close)
 
 	return &stack{
-		URL: httpServer.URL, Gateway: g, Upstreams: ups,
+		URL: httpServer.URL + api.MCPPath, BaseURL: httpServer.URL,
+		Gateway: g, Upstreams: ups,
 		Configs: configs, Bus: bus, Logs: store,
 	}
 }
