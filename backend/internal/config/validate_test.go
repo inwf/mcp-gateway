@@ -56,12 +56,6 @@ func TestValidateAcceptsEachTransport(t *testing.T) {
 			URL:       "https://example.com/mcp",
 			Timeout:   time.Minute,
 		},
-		"by-local": {
-			Transport: config.TransportStreamableHTTPLocal,
-			Command:   "uvx",
-			URL:       "http://127.0.0.1:9001/mcp",
-			Timeout:   time.Minute,
-		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -124,7 +118,6 @@ func TestValidateTopLevelRules(t *testing.T) {
 			c.Gateway.KeepAliveFailureThreshold = 0
 		}, "gateway.keepAliveFailureThreshold"},
 
-		{"zero readyTimeout", func(c *config.Config) { c.Startup.ReadyTimeout = 0 }, "startup.readyTimeout"},
 		{"negative retries", func(c *config.Config) { c.Startup.MaxRetries = -1 }, "startup.maxRetries"},
 		{"zero retryBackoff", func(c *config.Config) { c.Startup.RetryBackoff = 0 }, "startup.retryBackoff"},
 		{"negative connectDelay", func(c *config.Config) {
@@ -227,19 +220,6 @@ func TestValidateServerRules(t *testing.T) {
 				URL: "http:///mcp", Timeout: time.Minute},
 			"mcpServers.srv.url"},
 
-		{"local without command",
-			config.MCPServer{Transport: config.TransportStreamableHTTPLocal,
-				URL: "http://127.0.0.1:9001/mcp", Timeout: time.Minute},
-			"mcpServers.srv.command"},
-		{"local without url",
-			config.MCPServer{Transport: config.TransportStreamableHTTPLocal,
-				Command: "uvx", Timeout: time.Minute},
-			"mcpServers.srv.url"},
-
-		{"readyPatterns on stdio",
-			config.MCPServer{Transport: config.TransportStdio, Command: "npx",
-				ReadyPatterns: []string{"listening"}, Timeout: time.Minute},
-			"mcpServers.srv.readyPatterns"},
 		{"proxy on stdio",
 			config.MCPServer{Transport: config.TransportStdio, Command: "npx",
 				Proxy: "http://127.0.0.1:8080", Timeout: time.Minute},

@@ -102,7 +102,7 @@ func TestSaveOmitsUnsetServerFields(t *testing.T) {
 
 	// A server that sets none of these should not carry empty
 	// placeholders for them.
-	for _, key := range []string{"args:", "env:", "headers:", "tags:", "url:", "proxy:", "readyPatterns:", "exposedTools:", "description:"} {
+	for _, key := range []string{"args:", "env:", "headers:", "tags:", "url:", "proxy:", "exposedTools:", "description:"} {
 		if strings.Contains(text, key) {
 			t.Errorf("unset field %q is written out:\n%s", key, text)
 		}

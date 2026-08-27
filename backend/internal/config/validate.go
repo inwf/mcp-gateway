@@ -168,7 +168,6 @@ func (c Config) validateGateway(v *validator) {
 
 func (c Config) validateStartup(v *validator) {
 	v.nonNegativeDuration("startup.connectDelay", c.Startup.ConnectDelay)
-	v.positiveDuration("startup.readyTimeout", c.Startup.ReadyTimeout)
 	v.nonNegativeInt("startup.maxRetries", c.Startup.MaxRetries)
 	v.positiveDuration("startup.retryBackoff", c.Startup.RetryBackoff)
 }
@@ -195,52 +194,54 @@ func validateServerName(v *validator, name string) {
 	}
 }
 
+// The two transports are distinguished by where the server runs: stdio
+// starts one as a child process and talks to it over its pipes;
+// streamable-http dials one that is already running. Each therefore
+// needs exactly one of command and url, and setting the other is an
+// error rather than something to ignore — a url on a stdio server is
+// most likely a transport chosen by mistake, and silently dropping it
+// would leave mcphub talking to something other than what was meant.
 func validateServer(v *validator, field string, s MCPServer) {
-	needsCommand := s.Transport == TransportStdio || s.Transport == TransportStreamableHTTPLocal
-	needsURL := s.Transport == TransportStreamableHTTP || s.Transport == TransportStreamableHTTPLocal
+	var spawns bool
 
 	switch s.Transport {
-	case TransportStdio, TransportStreamableHTTP, TransportStreamableHTTPLocal:
+	case TransportStdio:
+		spawns = true
+	case TransportStreamableHTTP:
+		spawns = false
 	default:
-		v.add(field+".transport", "is %q, want one of %s, %s, %s",
-			s.Transport, TransportStdio, TransportStreamableHTTP, TransportStreamableHTTPLocal)
+		v.add(field+".transport", "is %q, want one of %s, %s",
+			s.Transport, TransportStdio, TransportStreamableHTTP)
 		// The remaining rules depend on knowing the transport.
 		return
 	}
 
-	if needsCommand && s.Command == "" {
+	if spawns && s.Command == "" {
 		v.add(field+".command", "is required for the %s transport", s.Transport)
 	}
-	if !needsCommand && s.Command != "" {
+	if !spawns && s.Command != "" {
 		v.add(field+".command", "is set but the %s transport does not start a process",
 			s.Transport)
 	}
 
-	if needsURL && s.URL == "" {
+	if !spawns && s.URL == "" {
 		v.add(field+".url", "is required for the %s transport", s.Transport)
 	}
-	if !needsURL && s.URL != "" {
+	if spawns && s.URL != "" {
 		v.add(field+".url", "is set but the %s transport does not connect over HTTP",
 			s.Transport)
 	}
 	if s.URL != "" {
 		v.httpURL(field+".url", s.URL)
 	}
+
 	if s.Proxy != "" {
-		if !needsURL {
+		if spawns {
 			v.add(field+".proxy", "is set but the %s transport does not connect over HTTP",
 				s.Transport)
 		} else {
 			v.httpURL(field+".proxy", s.Proxy)
 		}
-	}
-
-	// Readiness detection reads the child process output, so it only
-	// applies to the transport that both starts a process and then
-	// connects to it.
-	if len(s.ReadyPatterns) > 0 && s.Transport != TransportStreamableHTTPLocal {
-		v.add(field+".readyPatterns", "is set but only applies to the %s transport",
-			TransportStreamableHTTPLocal)
 	}
 
 	v.positiveDuration(field+".timeout", s.Timeout)

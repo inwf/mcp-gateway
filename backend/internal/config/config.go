@@ -16,14 +16,10 @@ const (
 	// newline-delimited JSON-RPC over its stdin/stdout.
 	TransportStdio Transport = "stdio"
 
-	// TransportStreamableHTTP connects to an already-running remote
-	// server over MCP's streamable HTTP transport.
+	// TransportStreamableHTTP connects to an already-running server over
+	// MCP's streamable HTTP transport. The server is someone else's to
+	// run; mcphub only dials it.
 	TransportStreamableHTTP Transport = "streamable-http"
-
-	// TransportStreamableHTTPLocal starts the server as a child process,
-	// waits for it to report readiness, then connects to it over
-	// streamable HTTP. It is the combination of the two above.
-	TransportStreamableHTTPLocal Transport = "streamable-http-local"
 )
 
 // SessionMode selects how the gateway handles MCP client sessions.
@@ -183,10 +179,6 @@ type Startup struct {
 	// that many child processes are not spawned at once.
 	ConnectDelay time.Duration `yaml:"connectDelay"`
 
-	// ReadyTimeout bounds how long to wait for an upstream started by
-	// mcphub to report readiness.
-	ReadyTimeout time.Duration `yaml:"readyTimeout"`
-
 	// MaxRetries is how many times a failed connection is retried.
 	MaxRetries int `yaml:"maxRetries"`
 
@@ -217,22 +209,16 @@ type MCPServer struct {
 	// Timeout bounds a single request to this server.
 	Timeout time.Duration `yaml:"timeout"`
 
-	// Command, Args and Env apply to the transports that spawn a child
-	// process: stdio and streamable-http-local.
+	// Command, Args and Env apply to the stdio transport, which runs the
+	// server as a child process.
 	Command string            `yaml:"command,omitempty"`
 	Args    []string          `yaml:"args,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
 
-	// URL, Headers and Proxy apply to the transports that speak HTTP:
-	// streamable-http and streamable-http-local.
+	// URL, Headers and Proxy apply to the streamable-http transport.
 	URL     string            `yaml:"url,omitempty"`
 	Headers map[string]string `yaml:"headers,omitempty"`
 	Proxy   string            `yaml:"proxy,omitempty"`
-
-	// ReadyPatterns applies to streamable-http-local only. The child
-	// process is considered ready once any of these substrings appears
-	// on its stdout or stderr.
-	ReadyPatterns []string `yaml:"readyPatterns,omitempty"`
 
 	// ExposedTools restricts which of this server's tools the gateway
 	// re-exposes. An empty list exposes all of them.

@@ -9,15 +9,13 @@ import { KeyValueEditor, StringListEditor } from '@/components/KeyValueEditor';
 /*
  * Adding and editing a server.
  *
- * The transports differ in what they need, and showing every field for
- * every transport would present a stdio server with a URL box it must
- * leave empty — which the gateway would then reject. So the form shows
- * what applies:
+ * The two transports differ in what they need, and showing every field
+ * for both would present a stdio server with a URL box it must leave
+ * empty — which the gateway would then reject. So the form shows what
+ * applies:
  *
- *   stdio                  a command, its arguments and its environment
- *   streamable-http        a URL, its headers and an optional proxy
- *   streamable-http-local  both, plus the patterns that say the child
- *                          process has finished starting
+ *   stdio            a command, its arguments and its environment
+ *   streamable-http  a URL, its headers and an optional proxy
  *
  * Switching transport keeps whatever was typed. Someone converting a
  * local server to a remote one should not have to retype its name,
@@ -40,7 +38,6 @@ export interface ServerFormValues {
   url: string;
   headers: Record<string, string>;
   proxy: string;
-  readyPatterns: string[];
   exposedTools: string[];
   tags: Record<string, string>;
 }
@@ -58,7 +55,6 @@ function emptyValues(): ServerFormValues {
     url: '',
     headers: {},
     proxy: '',
-    readyPatterns: [],
     exposedTools: [],
     tags: {},
   };
@@ -77,7 +73,6 @@ function valuesFrom(name: string, server: MCPServer): ServerFormValues {
     url: server.url ?? '',
     headers: server.headers ?? {},
     proxy: server.proxy ?? '',
-    readyPatterns: server.readyPatterns ?? [],
     exposedTools: server.exposedTools ?? [],
     tags: server.tags ?? {},
   };
@@ -86,8 +81,7 @@ function valuesFrom(name: string, server: MCPServer): ServerFormValues {
 /** Builds what the API takes, dropping everything the chosen transport
  *  does not use and everything left empty. */
 function serverFrom(values: ServerFormValues): MCPServer {
-  const spawns = values.transport !== 'streamable-http';
-  const overHTTP = values.transport !== 'stdio';
+  const spawns = values.transport === 'stdio';
 
   const server: MCPServer = {
     transport: values.transport,
@@ -104,13 +98,10 @@ function serverFrom(values: ServerFormValues): MCPServer {
     if (values.args.length) server.args = values.args;
     if (Object.keys(values.env).length) server.env = values.env;
   }
-  if (overHTTP) {
+  if (!spawns) {
     if (values.url.trim()) server.url = values.url.trim();
     if (Object.keys(values.headers).length) server.headers = values.headers;
     if (values.proxy.trim()) server.proxy = values.proxy.trim();
-  }
-  if (values.transport === 'streamable-http-local' && values.readyPatterns.length) {
-    server.readyPatterns = values.readyPatterns;
   }
 
   return server;
@@ -130,7 +121,6 @@ const FIELD_NAMES = [
   'url',
   'headers',
   'proxy',
-  'readyPatterns',
   'exposedTools',
   'tags',
 ] as const satisfies ReadonlyArray<keyof ServerFormValues>;
@@ -218,9 +208,7 @@ function FormBody({
   const [transport, setTransport] = useState<Transport>(initial.transport);
   const [failure, setFailure] = useState<string | null>(null);
 
-  const spawns = transport !== 'streamable-http';
-  const overHTTP = transport !== 'stdio';
-  const isLocal = transport === 'streamable-http-local';
+  const spawns = transport === 'stdio';
 
   const submit = async () => {
     // A form that does not validate is an expected outcome, not a
@@ -295,6 +283,8 @@ function FormBody({
           />
         </Form.Item>
 
+        {/* The two transports are exhaustive and mutually exclusive:
+            one runs the server, the other dials it. */}
         {spawns ? (
           <>
             <Form.Item
@@ -313,9 +303,7 @@ function FormBody({
               <KeyValueEditor secret keyPlaceholder="API_TOKEN" />
             </Form.Item>
           </>
-        ) : null}
-
-        {overHTTP ? (
+        ) : (
           <>
             <Form.Item
               name="url"
@@ -333,17 +321,7 @@ function FormBody({
               <Input className="mono" placeholder="http://127.0.0.1:7890" />
             </Form.Item>
           </>
-        ) : null}
-
-        {isLocal ? (
-          <Form.Item
-            name="readyPatterns"
-            label={t('form.readyPatterns')}
-            extra={t('form.readyPatternsHint')}
-          >
-            <StringListEditor placeholder="listening on" />
-          </Form.Item>
-        ) : null}
+        )}
 
         <Form.Item
           name="timeout"

@@ -49,7 +49,6 @@ interface FormValues {
   keepAlive: string;
   keepAliveFailureThreshold: number;
   connectDelay: string;
-  readyTimeout: string;
   maxRetries: number;
   retryBackoff: string;
 }
@@ -76,7 +75,6 @@ function valuesFrom(config: Config): FormValues {
     keepAlive: config.gateway.keepAlive,
     keepAliveFailureThreshold: config.gateway.keepAliveFailureThreshold,
     connectDelay: config.startup.connectDelay,
-    readyTimeout: config.startup.readyTimeout,
     maxRetries: config.startup.maxRetries,
     retryBackoff: config.startup.retryBackoff,
   };
@@ -118,7 +116,6 @@ function applyTo(config: Config, values: FormValues): Config {
     },
     startup: {
       connectDelay: values.connectDelay.trim(),
-      readyTimeout: values.readyTimeout.trim(),
       maxRetries: values.maxRetries,
       retryBackoff: values.retryBackoff.trim(),
     },
@@ -249,9 +246,6 @@ function SettingsForm({ config, onSave, saving }: {
         <Panel title={t('settings.startup')}>
           <div className={styles.grid}>
             <Form.Item name="connectDelay" label={t('settings.connectDelay')}>
-              <Input className="mono" />
-            </Form.Item>
-            <Form.Item name="readyTimeout" label={t('settings.readyTimeout')}>
               <Input className="mono" />
             </Form.Item>
             <Form.Item name="maxRetries" label={t('settings.maxRetries')}>

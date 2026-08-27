@@ -18,7 +18,7 @@ export type Duration = string;
 /** An RFC 3339 timestamp. */
 export type Timestamp = string;
 
-export const TRANSPORTS = ['stdio', 'streamable-http', 'streamable-http-local'] as const;
+export const TRANSPORTS = ['stdio', 'streamable-http'] as const;
 export type Transport = (typeof TRANSPORTS)[number];
 
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
@@ -39,18 +39,16 @@ export interface MCPServer {
   tags?: Record<string, string>;
   timeout: Duration;
 
-  /** For the transports that run the server as a child process. */
+  /** For stdio, which runs the server as a child process. */
   command?: string;
   args?: string[];
   env?: Record<string, string>;
 
-  /** For the transports that speak HTTP. */
+  /** For streamable-http, which dials a server someone else runs. */
   url?: string;
   headers?: Record<string, string>;
   proxy?: string;
 
-  /** streamable-http-local only: the child is ready once one appears. */
-  readyPatterns?: string[];
 
   /** Empty or absent exposes every tool the server offers. */
   exposedTools?: string[];
@@ -85,7 +83,6 @@ export interface Config {
   };
   startup: {
     connectDelay: Duration;
-    readyTimeout: Duration;
     maxRetries: number;
     retryBackoff: Duration;
   };

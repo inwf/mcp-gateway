@@ -62,7 +62,6 @@ func Default() Config {
 
 		Startup: Startup{
 			ConnectDelay: 3 * time.Second,
-			ReadyTimeout: 2 * time.Minute,
 			MaxRetries:   3,
 			RetryBackoff: 5 * time.Second,
 		},

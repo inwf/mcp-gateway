@@ -38,7 +38,6 @@ func managerFixture(t *testing.T) (*upstream.Manager, *events.Bus) {
 func fastStartup() config.Startup {
 	return config.Startup{
 		ConnectDelay: 0,
-		ReadyTimeout: 10 * time.Second,
 		MaxRetries:   0,
 		RetryBackoff: time.Millisecond,
 	}

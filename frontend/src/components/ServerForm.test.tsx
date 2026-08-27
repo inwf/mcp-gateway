@@ -50,16 +50,20 @@ describe('the fields a transport needs', () => {
     });
   });
 
-  it('offers both plus the ready patterns for streamable-http-local', async () => {
+  // The two are exhaustive, so switching back has to restore the first
+  // set rather than leaving the form with neither.
+  it('brings the command back when the transport is switched back', async () => {
     open();
 
-    await userEvent.click(screen.getByText('streamable-http-local', { selector: 'div' }));
+    await userEvent.click(screen.getByText('streamable-http', { selector: 'div' }));
+    await waitFor(() => expect(fieldsOnScreen().join(' ')).toContain('地址'));
+
+    await userEvent.click(screen.getByText('stdio', { selector: 'div' }));
 
     await waitFor(() => {
       const labels = fieldsOnScreen().join(' ');
       expect(labels).toContain('命令');
-      expect(labels).toContain('地址');
-      expect(labels).toContain('就绪匹配');
+      expect(labels).not.toContain('地址');
     });
   });
 

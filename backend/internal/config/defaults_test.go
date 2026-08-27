@@ -79,7 +79,6 @@ func TestDefaultDurationsArePositive(t *testing.T) {
 		{"gateway.notifyDebounce", c.Gateway.NotifyDebounce},
 		{"gateway.keepAlive", c.Gateway.KeepAlive},
 		{"startup.connectDelay", c.Startup.ConnectDelay},
-		{"startup.readyTimeout", c.Startup.ReadyTimeout},
 		{"startup.retryBackoff", c.Startup.RetryBackoff},
 	}
 
