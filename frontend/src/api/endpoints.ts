@@ -1,0 +1,148 @@
+import { api } from './client';
+import type {
+  AggregatedResource,
+  AggregatedTool,
+  Config,
+  ConfigResponse,
+  ConfigWriteResponse,
+  GatewayStatus,
+  GatewayTools,
+  Health,
+  LogQuery,
+  LogsResponse,
+  MCPServer,
+  Resource,
+  ResourceReadResult,
+  ServerStatus,
+  ServerView,
+  SessionInfo,
+  Tool,
+  ToolCallResult,
+  ValidationResponse,
+} from './types';
+
+const BASE = '/api';
+
+/*
+ * One function per endpoint, and the only place a URL is written down.
+ * Components ask for what they want; nothing outside this file needs to
+ * know that servers live at /api/servers.
+ */
+
+export const endpoints = {
+  health: () => api.get<Health>(`${BASE}/health`),
+
+  // ===== configuration =====
+
+  getConfig: () => api.get<ConfigResponse>(`${BASE}/config`),
+
+  putConfig: (config: Config) => api.put<ConfigWriteResponse>(`${BASE}/config`, { config }),
+
+  /** Checks without saving, so the settings form can mark bad fields as
+   *  they are edited rather than only on submission. */
+  validateConfig: (config: Config) =>
+    api.post<ValidationResponse>(`${BASE}/config/validate`, { config }),
+
+  // ===== servers =====
+
+  listServers: () =>
+    api.get<{ servers: ServerView[] }>(`${BASE}/servers`).then((r) => r.servers),
+
+  getServer: (name: string) =>
+    api.get<ServerView>(`${BASE}/servers/${encodeURIComponent(name)}`),
+
+  createServer: (name: string, server: MCPServer) =>
+    api.post<ServerView>(`${BASE}/servers`, { name, server }),
+
+  updateServer: (name: string, server: MCPServer) =>
+    api.put<ServerView>(`${BASE}/servers/${encodeURIComponent(name)}`, { server }),
+
+  deleteServer: (name: string) =>
+    api.delete<void>(`${BASE}/servers/${encodeURIComponent(name)}`),
+
+  connectServer: (name: string) =>
+    api.post<ServerStatus>(`${BASE}/servers/${encodeURIComponent(name)}/connect`, undefined, {
+      // Connecting starts a child process and waits for its handshake,
+      // which is slower than an ordinary request but not unbounded.
+      timeoutMs: 120_000,
+    }),
+
+  disconnectServer: (name: string) =>
+    api.post<ServerStatus>(`${BASE}/servers/${encodeURIComponent(name)}/disconnect`),
+
+  serverTools: (name: string) =>
+    api
+      .get<{ tools: Tool[] }>(`${BASE}/servers/${encodeURIComponent(name)}/tools`)
+      .then((r) => r.tools),
+
+  serverResources: (name: string) =>
+    api
+      .get<{ resources: Resource[] }>(`${BASE}/servers/${encodeURIComponent(name)}/resources`)
+      .then((r) => r.resources),
+
+  callTool: (server: string, tool: string, args: unknown) =>
+    api.post<ToolCallResult>(
+      `${BASE}/servers/${encodeURIComponent(server)}/tools/${encodeURIComponent(tool)}/call`,
+      args,
+    ),
+
+  readResource: (server: string, uri: string) =>
+    api.get<ResourceReadResult>(`${BASE}/servers/${encodeURIComponent(server)}/resource`, {
+      query: { uri },
+    }),
+
+  // ===== aggregated =====
+
+  tools: (options: { search?: string; tags?: string[]; limit?: number } = {}) => {
+    const query: Record<string, string | number> = {};
+    if (options.search) query['q'] = options.search;
+    if (options.limit) query['limit'] = options.limit;
+    const path = buildTagQuery(`${BASE}/tools`, options.tags);
+    return api
+      .get<{ tools: AggregatedTool[]; total: number }>(path, { query })
+      .then((r) => r.tools);
+  },
+
+  resources: (options: { tags?: string[] } = {}) =>
+    api
+      .get<{ resources: AggregatedResource[]; total: number }>(
+        buildTagQuery(`${BASE}/resources`, options.tags),
+      )
+      .then((r) => r.resources),
+
+  // ===== gateway =====
+
+  gatewayStatus: () => api.get<GatewayStatus>(`${BASE}/gateway/status`),
+
+  gatewaySessions: () =>
+    api
+      .get<{ sessions: SessionInfo[]; total: number }>(`${BASE}/gateway/sessions`)
+      .then((r) => r.sessions),
+
+  gatewayTools: () => api.get<GatewayTools>(`${BASE}/gateway/tools`),
+
+  // ===== logs =====
+
+  logs: (query: LogQuery = {}) =>
+    api.get<LogsResponse>(`${BASE}/logs`, {
+      query: {
+        server: query.server,
+        module: query.module,
+        level: query.level,
+        since: query.since,
+        limit: query.limit,
+      },
+    }),
+
+  clearLogs: (server?: string) =>
+    api.delete<void>(`${BASE}/logs`, { query: server ? { server } : {} }),
+};
+
+/** Tag filters repeat the same parameter, which URLSearchParams handles
+ *  but the query helper's object form cannot express. */
+function buildTagQuery(path: string, tags: string[] | undefined): string {
+  if (!tags?.length) return path;
+  const params = new URLSearchParams();
+  for (const tag of tags) params.append('tag', tag);
+  return `${path}?${params.toString()}`;
+}

@@ -1,0 +1,6 @@
+# msw's install script exists to copy its browser service worker into a
+# public directory. Tests here run in Node and intercept at the request
+# layer, so nothing needs that file. Declared rather than left as a
+# prompt so that an install is not interactive.
+allowBuilds:
+  msw: false

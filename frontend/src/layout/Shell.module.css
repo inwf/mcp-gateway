@@ -1,0 +1,227 @@
+.shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--rail-width) 1fr;
+  height: 100%;
+}
+
+/* ===== the rail =====
+ *
+ * A narrow column of icons rather than a bar of labelled links across
+ * the top. It gives the content the full height of the window, which is
+ * what a log viewer and a tool list both want, and it is the single
+ * decision that most changes how the application reads at a glance.
+ */
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-right: 1px solid var(--line);
+  background: linear-gradient(180deg, rgb(11 15 22 / 72%), rgb(6 8 13 / 88%));
+  backdrop-filter: blur(14px);
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius);
+  background: linear-gradient(145deg, var(--accent), #6366f1);
+  color: var(--ink-inverse);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 0 22px var(--accent-glow);
+  transition: transform var(--fast) var(--ease);
+}
+
+.mark:hover {
+  transform: translateY(-1px) scale(1.04);
+}
+
+.item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 38px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 17px;
+  cursor: pointer;
+  transition:
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+
+.item:hover {
+  color: var(--ink-muted);
+  background: rgb(255 255 255 / 4%);
+}
+
+.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* The marker for the current section: a short bar against the rail's
+   inner edge. A filled block behind the icon would compete with the
+   icon itself at this size. */
+.active::before {
+  content: '';
+  position: absolute;
+  left: -13px;
+  width: 2px;
+  height: 18px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ===== main column ===== */
+
+.main {
+  display: grid;
+  grid-template-rows: var(--topbar-height) 1fr;
+  min-width: 0; /* lets wide children scroll rather than stretch the grid */
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--line);
+  background: rgb(6 8 13 / 55%);
+  backdrop-filter: blur(14px);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.crumb {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.topbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+.content {
+  min-width: 0;
+  padding: var(--space-5);
+  overflow: auto;
+}
+
+/* ===== connection indicator ===== */
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.dotOpen {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-dim);
+  animation: pulse 2.6s var(--ease) infinite;
+}
+
+.dotConnecting {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-dim);
+  animation: pulse 1s var(--ease) infinite;
+}
+
+.dotClosed {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-dim);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.42;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dotOpen,
+  .dotConnecting {
+    animation: none;
+  }
+}
+
+/* ===== narrow windows =====
+   The rail becomes a bottom bar rather than disappearing: on a narrow
+   window the nav is what is reached for most, and a hamburger would put
+   it two taps away. */
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+
+  .rail {
+    grid-row: 2;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--line);
+    border-right: 0;
+  }
+
+  .mark,
+  .spacer {
+    display: none;
+  }
+
+  .active::before {
+    top: -9px;
+    left: auto;
+    width: 18px;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+  }
+
+  .content {
+    padding: var(--space-4);
+  }
+}

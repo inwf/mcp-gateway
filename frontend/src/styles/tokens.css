@@ -1,0 +1,108 @@
+/*
+ * The design tokens, and the only place a colour is written down.
+ *
+ * These are consumed twice: by the stylesheets in this project, and by
+ * antd's ConfigProvider (see src/theme/antd.ts, which reads the same
+ * values). One palette with two readers rather than two palettes that
+ * have to be kept in agreement — the failure mode of the latter is a
+ * panel whose border is a shade off from the table inside it, which is
+ * both easy to introduce and hard to notice.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ===== surfaces =====
+     A stack rather than a single background: depth here comes from
+     four steps of near-black with a cool cast, since drop shadows are
+     close to invisible on a dark ground. */
+  --void: #06080d;
+  --surface: #0b0f16;
+  --raised: #111823;
+  --overlay: #18202c;
+  --sunken: #05070b;
+
+  /* ===== lines =====
+     Hairlines, low contrast at rest. Structure is drawn with these
+     rather than with shadow. */
+  --line: rgb(255 255 255 / 7%);
+  --line-strong: rgb(255 255 255 / 13%);
+  --line-accent: rgb(45 212 191 / 45%);
+
+  /* ===== text ===== */
+  --ink: #e8edf5;
+  --ink-muted: #93a1b5;
+  --ink-faint: #5d6b80;
+  --ink-inverse: #06080d;
+
+  /* ===== accent =====
+     Teal, deliberately not the blue that reads as a default admin
+     panel. The glow is what carries emphasis on a dark ground. */
+  --accent: #2dd4bf;
+  --accent-strong: #14b8a6;
+  --accent-dim: rgb(45 212 191 / 12%);
+  --accent-glow: rgb(45 212 191 / 32%);
+
+  /* ===== state ===== */
+  --ok: #4ade80;
+  --ok-dim: rgb(74 222 128 / 12%);
+  --warn: #fbbf24;
+  --warn-dim: rgb(251 191 36 / 12%);
+  --danger: #fb7185;
+  --danger-dim: rgb(251 113 133 / 12%);
+  --info: #a78bfa;
+  --info-dim: rgb(167 139 250 / 12%);
+
+  /* ===== type =====
+     Two families with a clear division of labour: prose in the system
+     UI face, and every identifier, count and timestamp in monospace.
+     Machine-readable values are what this application is mostly made
+     of, and setting them in mono is most of what makes it read as an
+     instrument rather than a form. */
+  --font-ui:
+    system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas,
+    monospace;
+
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.875rem;
+  --text-display: 2.75rem;
+
+  /* ===== metrics ===== */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 14px;
+  --rail-width: 60px;
+  --topbar-height: 52px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* ===== motion =====
+     One pair of durations and one easing, so that everything that
+     moves looks like it belongs to the same machine. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 140ms;
+  --slow: 320ms;
+}
+
+/* Someone who has asked their system not to animate things means it.
+   Transitions are kept, since a colour fade conveys no motion, but
+   anything that travels is switched off. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 1ms;
+    --slow: 1ms;
+  }
+}

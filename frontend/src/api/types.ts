@@ -1,0 +1,321 @@
+/*
+ * The shapes the management API speaks.
+ *
+ * These mirror the configuration file exactly: the same field names, and
+ * durations as the strings a person writes rather than as numbers. The
+ * backend serves the configuration in its file shape for this reason —
+ * a duration as an integer has no unit attached to it, and the settings
+ * form and the raw-YAML editor would otherwise disagree about what a
+ * field is called.
+ *
+ * A field that is optional here is one the server omits when it has no
+ * value, so `undefined` means "not set" rather than "set to nothing".
+ */
+
+/** A duration as it is written in the configuration: `30s`, `5m0s`, `168h0m0s`. */
+export type Duration = string;
+
+/** An RFC 3339 timestamp. */
+export type Timestamp = string;
+
+export const TRANSPORTS = ['stdio', 'streamable-http', 'streamable-http-local'] as const;
+export type Transport = (typeof TRANSPORTS)[number];
+
+export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+export const SERVER_STATES = ['disconnected', 'connecting', 'connected', 'failed'] as const;
+export type ServerState = (typeof SERVER_STATES)[number];
+
+export type SessionMode = 'stateful' | 'stateless';
+
+// ===== configuration =====
+
+export interface MCPServer {
+  transport: Transport;
+  enabled: boolean;
+  description?: string;
+  /** Free-form key/value metadata, for grouping and filtering only. */
+  tags?: Record<string, string>;
+  timeout: Duration;
+
+  /** For the transports that run the server as a child process. */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+
+  /** For the transports that speak HTTP. */
+  url?: string;
+  headers?: Record<string, string>;
+  proxy?: string;
+
+  /** streamable-http-local only: the child is ready once one appears. */
+  readyPatterns?: string[];
+
+  /** Empty or absent exposes every tool the server offers. */
+  exposedTools?: string[];
+}
+
+export interface Config {
+  version: number;
+  listen: { host: string; port: number };
+  logging: {
+    level: LogLevel;
+    format: 'console' | 'json';
+    maxAge: Duration;
+    maxSizeMB: number;
+    mcpWireDebug: boolean;
+    apiDebug: boolean;
+  };
+  security: {
+    allowedNetworks: string[];
+    allowedOrigins?: string[];
+    maxConnections: number;
+    maxConcurrentRequests: number;
+    connectionTimeout: Duration;
+    idleConnectionTimeout: Duration;
+  };
+  gateway: {
+    defaultSessionMode: SessionMode;
+    sessionModeRules: { stateful?: string[]; stateless?: string[] };
+    sessionTimeout: Duration;
+    notifyDebounce: Duration;
+    keepAlive: Duration;
+    keepAliveFailureThreshold: number;
+  };
+  startup: {
+    connectDelay: Duration;
+    readyTimeout: Duration;
+    maxRetries: number;
+    retryBackoff: Duration;
+  };
+  mcpServers: Record<string, MCPServer>;
+}
+
+/** The placeholder a hidden secret is handed out as. Sending it back
+ *  unchanged means "leave this alone"; the server restores the real
+ *  value. Anything else is taken as a new secret. */
+export const REDACTED = '[redacted]';
+
+/** The username a hidden URL credential is handed out as. */
+export const REDACTED_URL_USER = 'redacted';
+
+export interface ConfigResponse {
+  config: Config;
+  /** Where the file lives, so the UI can say what it is editing. */
+  path: string;
+}
+
+export interface ConfigChange {
+  field: string;
+  from: string;
+  to: string;
+}
+
+export interface ConfigWriteResponse {
+  config: Config;
+  changes: ConfigChange[];
+}
+
+export interface ValidationResponse {
+  valid: boolean;
+  fields: FieldError[];
+}
+
+// ===== servers =====
+
+export interface ServerStatus {
+  name: string;
+  state: ServerState;
+  /** Set when the state is `failed`. */
+  error?: string;
+  /** Absent when the server has never been reached for. */
+  lastCheck?: Timestamp;
+  toolCount: number;
+  resourceCount: number;
+  /** Set only for transports that run the server as a child process. */
+  pid?: number;
+  startedAt?: Timestamp;
+  /** What the far side called itself during the handshake. */
+  serverName?: string;
+  serverVersion?: string;
+  protocolVersion?: string;
+  /** Declared capabilities. They explain an empty list: a server may
+   *  not support resources at all, which is not the same as having
+   *  none. */
+  hasTools: boolean;
+  hasResources: boolean;
+  hasPrompts: boolean;
+  hasLogging: boolean;
+}
+
+export interface ServerView {
+  name: string;
+  config: MCPServer;
+  status: ServerStatus;
+}
+
+// ===== tools and resources =====
+
+export interface Tool {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema?: unknown;
+}
+
+export interface Resource {
+  uri: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export interface AggregatedTool {
+  /** Where the tool came from, and its name there. */
+  server: string;
+  tool: string;
+  /** The name the gateway offers it under, after conflict resolution. */
+  exposed: string;
+  description?: string;
+  inputSchema?: unknown;
+  tags?: Record<string, string>;
+  /** Set when the list came from a search, and orders it. */
+  score?: number;
+}
+
+export interface AggregatedResource {
+  server: string;
+  uri: string;
+  exposed: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+/** One piece of a tool result or a resource read. The shape is the MCP
+ *  protocol's, which is a union discriminated by `type`. */
+export interface ContentBlock {
+  type: 'text' | 'image' | 'audio' | 'resource' | 'resource_link' | string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+  uri?: string;
+  [key: string]: unknown;
+}
+
+export interface ToolCallResult {
+  /** A tool that ran and reported a problem is a successful call with a
+   *  failed result. Both need showing, and differently. */
+  isError: boolean;
+  content: ContentBlock[];
+  structuredContent?: unknown;
+}
+
+export interface ResourceReadResult {
+  contents: ContentBlock[];
+}
+
+// ===== gateway =====
+
+export interface GatewayStatus {
+  servers: { configured: number; connected: number; failed: number };
+  /** How many tools the gateway publishes, which is not the sum of the
+   *  upstreams': it adds its own and applies each server's exposure
+   *  rules. */
+  tools: number;
+  sessions: number;
+  sessionMode: SessionMode;
+}
+
+export interface SessionInfo {
+  id: string;
+  clientName?: string;
+  clientVersion?: string;
+  protocolVersion?: string;
+}
+
+export interface GatewayTools {
+  tools: Tool[];
+  total: number;
+  systemTools: string[];
+}
+
+// ===== logs =====
+
+export const LOG_MODULES = [
+  'config',
+  'upstream',
+  'gateway',
+  'api',
+  'ws',
+  'cli',
+  'server',
+] as const;
+export type LogModule = (typeof LOG_MODULES)[number];
+
+export interface LogEntry {
+  time: Timestamp;
+  level: LogLevel;
+  message: string;
+  module?: string;
+  server?: string;
+  attrs?: Record<string, string>;
+}
+
+export interface LogQuery {
+  server?: string;
+  module?: string;
+  level?: LogLevel;
+  since?: string;
+  limit?: number;
+}
+
+export interface LogsResponse {
+  entries: LogEntry[];
+  /** Which servers have logs, for the filter to offer. */
+  servers: string[];
+}
+
+// ===== health =====
+
+export interface Health {
+  status: string;
+  version: string;
+  startedAt: Timestamp;
+  uptimeSeconds: number;
+  connections?: number;
+}
+
+// ===== errors =====
+
+export const ERROR_CODES = [
+  'bad_request',
+  'validation_failed',
+  'not_found',
+  'conflict',
+  'forbidden',
+  'too_many_requests',
+  'unavailable',
+  'internal',
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+export interface FieldError {
+  /** A dotted path into the configuration, such as `listen.port` or
+   *  `mcpServers.files.command`, so a form can mark the right input. */
+  field: string;
+  message: string;
+}
+
+export interface Failure {
+  code: ErrorCode;
+  message: string;
+  requestId?: string;
+  fields?: FieldError[];
+}
+
+export interface Envelope {
+  error: Failure;
+}
