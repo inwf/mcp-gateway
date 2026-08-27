@@ -1,9 +1,440 @@
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { App, Alert, Button, Form, Input, InputNumber, Segmented, Skeleton, Switch, Tabs } from 'antd';
+import { parse, stringify } from 'yaml';
+import { endpoints } from '@/api/endpoints';
+import { keys } from '@/api/query';
+import { ApiError } from '@/api/client';
+import { LOG_LEVELS, type Config, type FieldError } from '@/api/types';
+import { Panel } from '@/components/Panel';
+import { ErrorNotice } from '@/components/ErrorNotice';
+import { StringListEditor } from '@/components/KeyValueEditor';
+import { cx } from '@/lib/cx';
+import styles from './Settings.module.css';
 
-// Placeholder. The page itself lands in the next batch; this exists so
-// that routing, the shell and the data layer can be exercised end to
-// end before any of it depends on a finished page.
+/*
+ * The gateway's own configuration, two ways.
+ *
+ * The form covers the settings with a shape worth knowing about. The
+ * raw editor covers everything, including the servers — which have
+ * their own page, so they are not duplicated here.
+ *
+ * Both edit the same document, because the API speaks the file's shape:
+ * what the form calls `security.allowedNetworks` is spelled exactly that
+ * way in the YAML, and a duration is the same string in both.
+ */
+
+/** The fields the form knows about, flattened. The rest of the document
+ *  is carried through untouched, so editing the port cannot drop a
+ *  setting this form has never heard of. */
+interface FormValues {
+  host: string;
+  port: number;
+  level: (typeof LOG_LEVELS)[number];
+  format: 'console' | 'json';
+  maxAge: string;
+  maxSizeMB: number;
+  mcpWireDebug: boolean;
+  apiDebug: boolean;
+  allowedNetworks: string[];
+  allowedOrigins: string[];
+  maxConnections: number;
+  maxConcurrentRequests: number;
+  connectionTimeout: string;
+  idleConnectionTimeout: string;
+  defaultSessionMode: 'stateful' | 'stateless';
+  sessionTimeout: string;
+  notifyDebounce: string;
+  keepAlive: string;
+  keepAliveFailureThreshold: number;
+  connectDelay: string;
+  readyTimeout: string;
+  maxRetries: number;
+  retryBackoff: string;
+}
+
+function valuesFrom(config: Config): FormValues {
+  return {
+    host: config.listen.host,
+    port: config.listen.port,
+    level: config.logging.level,
+    format: config.logging.format,
+    maxAge: config.logging.maxAge,
+    maxSizeMB: config.logging.maxSizeMB,
+    mcpWireDebug: config.logging.mcpWireDebug,
+    apiDebug: config.logging.apiDebug,
+    allowedNetworks: config.security.allowedNetworks,
+    allowedOrigins: config.security.allowedOrigins ?? [],
+    maxConnections: config.security.maxConnections,
+    maxConcurrentRequests: config.security.maxConcurrentRequests,
+    connectionTimeout: config.security.connectionTimeout,
+    idleConnectionTimeout: config.security.idleConnectionTimeout,
+    defaultSessionMode: config.gateway.defaultSessionMode,
+    sessionTimeout: config.gateway.sessionTimeout,
+    notifyDebounce: config.gateway.notifyDebounce,
+    keepAlive: config.gateway.keepAlive,
+    keepAliveFailureThreshold: config.gateway.keepAliveFailureThreshold,
+    connectDelay: config.startup.connectDelay,
+    readyTimeout: config.startup.readyTimeout,
+    maxRetries: config.startup.maxRetries,
+    retryBackoff: config.startup.retryBackoff,
+  };
+}
+
+/** Folds the form back into the configuration it came from, leaving
+ *  everything the form does not cover — the servers above all — exactly
+ *  as it was. */
+function applyTo(config: Config, values: FormValues): Config {
+  return {
+    ...config,
+    listen: { host: values.host.trim(), port: values.port },
+    logging: {
+      level: values.level,
+      format: values.format,
+      maxAge: values.maxAge.trim(),
+      maxSizeMB: values.maxSizeMB,
+      mcpWireDebug: values.mcpWireDebug,
+      apiDebug: values.apiDebug,
+    },
+    security: {
+      ...config.security,
+      allowedNetworks: values.allowedNetworks,
+      // An empty list here means "allow everyone", which is not the
+      // same as the field being absent — so it is sent either way.
+      ...(values.allowedOrigins.length ? { allowedOrigins: values.allowedOrigins } : {}),
+      maxConnections: values.maxConnections,
+      maxConcurrentRequests: values.maxConcurrentRequests,
+      connectionTimeout: values.connectionTimeout.trim(),
+      idleConnectionTimeout: values.idleConnectionTimeout.trim(),
+    },
+    gateway: {
+      ...config.gateway,
+      defaultSessionMode: values.defaultSessionMode,
+      sessionTimeout: values.sessionTimeout.trim(),
+      notifyDebounce: values.notifyDebounce.trim(),
+      keepAlive: values.keepAlive.trim(),
+      keepAliveFailureThreshold: values.keepAliveFailureThreshold,
+    },
+    startup: {
+      connectDelay: values.connectDelay.trim(),
+      readyTimeout: values.readyTimeout.trim(),
+      maxRetries: values.maxRetries,
+      retryBackoff: values.retryBackoff.trim(),
+    },
+  };
+}
+
+function FieldErrors({ fields }: { fields: FieldError[] }) {
+  if (fields.length === 0) return null;
+  return (
+    <ul className={styles.fieldErrors}>
+      {fields.map((field) => (
+        <li key={field.field} className={styles.fieldError}>
+          <span className={styles.fieldName}>{field.field}</span>
+          <span className={styles.fieldMessage}>{field.message}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SettingsForm({ config, onSave, saving }: {
+  config: Config;
+  onSave: (next: Config) => void;
+  saving: boolean;
+}) {
+  const { t } = useTranslation();
+  const [form] = Form.useForm<FormValues>();
+  const initial = useMemo(() => valuesFrom(config), [config]);
+
+  return (
+    <Form
+      form={form}
+      layout="vertical"
+      initialValues={initial}
+      requiredMark={false}
+      onFinish={(values) => onSave(applyTo(config, values))}
+    >
+      <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        <Panel title={t('settings.listen')}>
+          <div className={styles.grid}>
+            <Form.Item name="host" label={t('settings.host')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item name="port" label={t('settings.port')} extra={t('settings.portHint')}>
+              <InputNumber min={0} max={65535} className="mono" style={{ width: '100%' }} />
+            </Form.Item>
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.logging')}>
+          <div className={styles.grid}>
+            <Form.Item name="level" label={t('settings.level')}>
+              <Segmented options={LOG_LEVELS.map((value) => ({ label: value, value }))} block />
+            </Form.Item>
+            <Form.Item name="format" label={t('settings.format')}>
+              <Segmented options={['console', 'json']} block />
+            </Form.Item>
+            <Form.Item name="maxAge" label={t('settings.maxAge')} extra={t('form.timeoutHint')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item name="maxSizeMB" label={t('settings.maxSizeMB')}>
+              <InputNumber min={1} className="mono" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="mcpWireDebug" label={t('settings.mcpWireDebug')} valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="apiDebug" label={t('settings.apiDebug')} valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.security')}>
+          <div className={styles.grid}>
+            <Form.Item
+              name="allowedNetworks"
+              label={t('settings.allowedNetworks')}
+              extra={t('settings.allowedNetworksHint')}
+              className={cx(styles.wide)}
+            >
+              <StringListEditor placeholder="127.0.0.1/32" />
+            </Form.Item>
+            <Form.Item
+              name="allowedOrigins"
+              label={t('settings.allowedOrigins')}
+              className={cx(styles.wide)}
+            >
+              <StringListEditor placeholder="http://localhost:5173" />
+            </Form.Item>
+            <Form.Item name="maxConnections" label={t('settings.maxConnections')}>
+              <InputNumber min={1} className="mono" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="maxConcurrentRequests" label={t('settings.maxConcurrentRequests')}>
+              <InputNumber min={1} className="mono" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="connectionTimeout" label={t('settings.connectionTimeout')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item name="idleConnectionTimeout" label={t('settings.idleConnectionTimeout')}>
+              <Input className="mono" />
+            </Form.Item>
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.gateway')}>
+          <div className={styles.grid}>
+            <Form.Item name="defaultSessionMode" label={t('settings.defaultSessionMode')}>
+              <Segmented options={['stateful', 'stateless']} block />
+            </Form.Item>
+            <Form.Item name="sessionTimeout" label={t('settings.sessionTimeout')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item name="notifyDebounce" label={t('settings.notifyDebounce')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item name="keepAlive" label={t('settings.keepAlive')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item
+              name="keepAliveFailureThreshold"
+              label={t('settings.keepAliveFailureThreshold')}
+            >
+              <InputNumber min={0} className="mono" style={{ width: '100%' }} />
+            </Form.Item>
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.startup')}>
+          <div className={styles.grid}>
+            <Form.Item name="connectDelay" label={t('settings.connectDelay')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item name="readyTimeout" label={t('settings.readyTimeout')}>
+              <Input className="mono" />
+            </Form.Item>
+            <Form.Item name="maxRetries" label={t('settings.maxRetries')}>
+              <InputNumber min={0} className="mono" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="retryBackoff" label={t('settings.retryBackoff')}>
+              <Input className="mono" />
+            </Form.Item>
+          </div>
+        </Panel>
+
+        <div className={styles.actions}>
+          <Button onClick={() => form.resetFields()}>{t('form.cancel')}</Button>
+          <Button type="primary" htmlType="submit" loading={saving}>
+            {t('form.save')}
+          </Button>
+        </div>
+      </div>
+    </Form>
+  );
+}
+
+/**
+ * The configuration as text.
+ *
+ * A plain textarea rather than a code editor: syntax highlighting for
+ * YAML costs more in the bundle than the whole rest of this page, and
+ * what actually catches mistakes here is the gateway's own validation,
+ * which reports the offending field by name. That is wired to the
+ * button, so an invalid document is refused before it is written.
+ */
+function RawEditor({ config, onSave, saving }: {
+  config: Config;
+  onSave: (next: Config) => void;
+  saving: boolean;
+}) {
+  const { t } = useTranslation();
+
+  const original = useMemo(() => stringify(config, { indent: 2 }), [config]);
+  const [text, setText] = useState(original);
+  const [seed, setSeed] = useState(original);
+  const [fields, setFields] = useState<FieldError[]>([]);
+
+  // Re-seed when the configuration is reloaded from the gateway.
+  if (seed !== original) {
+    setSeed(original);
+    setText(original);
+    setFields([]);
+  }
+
+  const parsed = useMemo(() => {
+    try {
+      return { value: parse(text) as Config, error: null };
+    } catch (error) {
+      return { value: null, error: (error as Error).message };
+    }
+  }, [text]);
+
+  const check = useMutation({
+    mutationFn: (candidate: Config) => endpoints.validateConfig(candidate),
+    onSuccess: (result, candidate) => {
+      setFields(result.fields);
+      if (result.valid) onSave(candidate);
+    },
+  });
+
+  const dirty = text !== original;
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+      <textarea
+        className={styles.editor}
+        value={text}
+        spellCheck={false}
+        onChange={(e) => setText(e.target.value)}
+      />
+
+      {parsed.error ? (
+        <span className={styles.problem}>
+          {t('settings.invalidYaml')} — {parsed.error}
+        </span>
+      ) : null}
+
+      <FieldErrors fields={fields} />
+
+      <div className={styles.actions}>
+        {dirty ? <span className={styles.dirty}>●</span> : null}
+        <Button onClick={() => setText(original)} disabled={!dirty}>
+          {t('form.cancel')}
+        </Button>
+        <Button
+          type="primary"
+          loading={saving || check.isPending}
+          disabled={parsed.error !== null || !dirty}
+          // Checked before it is written, so a document the gateway
+          // would reject never reaches the file.
+          onClick={() => parsed.value && check.mutate(parsed.value)}
+        >
+          {t('form.save')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { t } = useTranslation();
-  return <p className="label">{t('settings.title')}</p>;
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  const [failure, setFailure] = useState<{ message: string; fields: FieldError[] } | null>(null);
+
+  const config = useQuery({ queryKey: keys.config.current(), queryFn: endpoints.getConfig });
+
+  const save = useMutation({
+    mutationFn: (next: Config) => endpoints.putConfig(next),
+    onSuccess: (result) => {
+      setFailure(null);
+      void message.success(t('settings.saved'));
+      // The listen address only takes effect on the next start, and
+      // saying so beats someone wondering why the port did not change.
+      if (result.changes.some((change) => change.field.startsWith('listen.'))) {
+        void message.info(t('settings.restartNeeded'));
+      }
+      void queryClient.invalidateQueries();
+    },
+    onError: (error) => {
+      const failed = error instanceof ApiError ? error : null;
+      setFailure({
+        message: failed?.message ?? t('error.unknown'),
+        fields: failed?.fields ?? [],
+      });
+    },
+  });
+
+  if (config.isPending) return <Skeleton active paragraph={{ rows: 8 }} />;
+  if (config.isError) {
+    return <ErrorNotice error={config.error} onRetry={() => void config.refetch()} />;
+  }
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.path}>
+        <span className="label">{t('settings.path')}</span>
+        <span className={styles.pathValue}>{config.data.path}</span>
+      </div>
+
+      {failure ? (
+        <Alert
+          type="error"
+          showIcon
+          message={failure.message}
+          description={<FieldErrors fields={failure.fields} />}
+          closable
+          onClose={() => setFailure(null)}
+        />
+      ) : null}
+
+      <Tabs
+        items={[
+          {
+            key: 'form',
+            label: t('settings.form'),
+            children: (
+              <SettingsForm
+                config={config.data.config}
+                onSave={(next) => save.mutate(next)}
+                saving={save.isPending}
+              />
+            ),
+          },
+          {
+            key: 'yaml',
+            label: t('settings.yaml'),
+            children: (
+              <RawEditor
+                config={config.data.config}
+                onSave={(next) => save.mutate(next)}
+                saving={save.isPending}
+              />
+            ),
+          },
+        ]}
+      />
+    </div>
+  );
 }

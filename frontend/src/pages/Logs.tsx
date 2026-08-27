@@ -1,9 +1,20 @@
 import { useTranslation } from 'react-i18next';
+import { Panel } from '@/components/Panel';
+import { LogView } from '@/components/LogView';
 
-// Placeholder. The page itself lands in the next batch; this exists so
-// that routing, the shell and the data layer can be exercised end to
-// end before any of it depends on a finished page.
+/**
+ * The whole log.
+ *
+ * Everything here lives in LogView, which the server detail page also
+ * uses. The difference between the two is which filters are fixed: this
+ * one lets the server be chosen, that one pins it.
+ */
 export default function Logs() {
   const { t } = useTranslation();
-  return <p className="label">{t('logs.title')}</p>;
+
+  return (
+    <Panel title={t('logs.title')}>
+      <LogView />
+    </Panel>
+  );
 }

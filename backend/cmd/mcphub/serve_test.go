@@ -116,10 +116,16 @@ func TestServeCreatesAMissingConfigurationFile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan string, 1)
 	done := make(chan error, 1)
+	anyFreePort := 0
 	go func() {
 		done <- serve(ctx, serveOptions{
 			DataDir: dir,
-			Ready:   func(addr string) { ready <- addr },
+			// There is no configuration file to put a port in — that is
+			// the point of this test — so the port comes from here
+			// rather than from the default, which a developer running
+			// this program is likely to be using.
+			Port:  &anyFreePort,
+			Ready: func(addr string) { ready <- addr },
 		}, io.Discard, io.Discard)
 	}()
 

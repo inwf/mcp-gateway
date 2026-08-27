@@ -41,6 +41,13 @@ type serveOptions struct {
 	// Ready is called with the address actually being listened on. Tests
 	// use it to find a listener bound to port zero.
 	Ready func(addr string)
+
+	// Port overrides the configured port when set. Tests use it so that
+	// none of them binds a fixed port: the default is a port a developer
+	// is likely to have an instance of this very program listening on,
+	// and a test that collides with it fails for a reason that has
+	// nothing to do with what it was checking.
+	Port *int
 }
 
 // serve runs the gateway until ctx is cancelled, then shuts down.
@@ -108,6 +115,10 @@ func serve(ctx context.Context, opts serveOptions, stdout, stderr io.Writer) err
 	})
 	if err != nil {
 		return err
+	}
+
+	if opts.Port != nil {
+		cfg.Listen.Port = *opts.Port
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Listen.Host, cfg.Listen.Port))

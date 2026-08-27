@@ -197,9 +197,12 @@ export interface AggregatedResource {
 /** One piece of a tool result or a resource read. The shape is the MCP
  *  protocol's, which is a union discriminated by `type`. */
 export interface ContentBlock {
-  type: 'text' | 'image' | 'audio' | 'resource' | 'resource_link' | string;
+  type?: 'text' | 'image' | 'audio' | 'resource' | 'resource_link' | string;
   text?: string;
+  /** Base64, on a tool result's image or audio block. */
   data?: string;
+  /** Base64, on a resource whose contents are not text. */
+  blob?: string;
   mimeType?: string;
   uri?: string;
   [key: string]: unknown;
