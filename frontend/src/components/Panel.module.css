@@ -1,0 +1,47 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgb(17 24 35 / 62%), rgb(11 15 22 / 52%));
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.body {
+  min-height: 0;
+  padding: var(--space-4);
+  overflow: auto;
+}
+
+/* A panel whose body is a list of rows manages its own padding, so the
+   dividers can run the full width. */
+.flush {
+  padding: 0;
+}

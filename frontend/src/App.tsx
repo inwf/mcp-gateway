@@ -23,7 +23,14 @@ export function App() {
   const router = useMemo(() => createBrowserRouter(routes), []);
 
   return (
-    <ConfigProvider theme={antdTheme} locale={zhCN}>
+    <ConfigProvider
+      theme={antdTheme}
+      locale={zhCN}
+      // antd puts a space between the two characters of a Chinese
+      // button label by convention. On a dense console it reads as a
+      // typo rather than as typography.
+      button={{ autoInsertSpace: false }}
+    >
       {/* AntApp is what makes message and modal calls pick up the theme
           above; the static antd.message.* functions render outside this
           tree and would come out in the default light palette. */}

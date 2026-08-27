@@ -232,6 +232,10 @@ export const zh = {
     offline: '无法连接到网关',
     offlineHint: '它可能没有在运行。启动后本页会自动恢复。',
     notFound: '找不到该页面',
+    staleCode: '页面代码已过期',
+    staleCodeHint:
+      '网关可能在这个标签页打开期间重新构建过，本页依赖的代码已经不存在了。重新加载即可恢复。',
+    reload: '重新加载',
     retry: '重试',
     back: '返回',
     requestId: '请求编号',

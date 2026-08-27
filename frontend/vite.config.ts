@@ -17,6 +17,11 @@ export default defineConfig({
 
   server: {
     port: 5173,
+    // A silent fallback to the next free port would break the
+    // gateway's websocket origin check, and the only symptom would be
+    // the UI reporting itself disconnected with no reason given.
+    // Failing to start is the clearer outcome.
+    strictPort: true,
     proxy: {
       '/api': { target: BACKEND, changeOrigin: false },
       // changeOrigin stays off so that the backend sees this page's

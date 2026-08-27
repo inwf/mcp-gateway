@@ -1,0 +1,103 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.stream {
+  flex: 1;
+  min-height: 240px;
+  padding: var(--space-2) 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.line {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: 1px var(--space-3);
+  border-left: 2px solid transparent;
+}
+
+.line:hover {
+  background: rgb(255 255 255 / 2.5%);
+}
+
+.at {
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.level {
+  width: 4.2em;
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.origin {
+  color: var(--info);
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.message {
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The attributes carry the detail — which server, which error, which
+   request — and are dimmer than the message so a scan reads the
+   messages and a stop reads the detail. */
+.attrs {
+  color: var(--ink-faint);
+}
+
+.attrKey {
+  color: var(--ink-muted);
+}
+
+.debug .level {
+  color: var(--ink-faint);
+}
+
+.info .level {
+  color: var(--accent);
+}
+
+.warn {
+  border-left-color: var(--warn);
+}
+
+.warn .level {
+  color: var(--warn);
+}
+
+.error {
+  border-left-color: var(--danger);
+  background: rgb(251 113 133 / 4%);
+}
+
+.error .level {
+  color: var(--danger);
+}

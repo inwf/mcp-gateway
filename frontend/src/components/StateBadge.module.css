@@ -1,0 +1,85 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 99px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.connected {
+  border-color: rgb(74 222 128 / 28%);
+  background: var(--ok-dim);
+  color: var(--ok);
+}
+
+.connected .dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+}
+
+.connecting {
+  border-color: rgb(251 191 36 / 28%);
+  background: var(--warn-dim);
+  color: var(--warn);
+}
+
+.connecting .dot {
+  background: var(--warn);
+  animation: blink 1s var(--ease) infinite;
+}
+
+.failed {
+  border-color: rgb(251 113 133 / 28%);
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+.failed .dot {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
+}
+
+.disconnected {
+  border-color: var(--line-strong);
+  background: rgb(255 255 255 / 3%);
+  color: var(--ink-faint);
+}
+
+.disconnected .dot {
+  background: var(--ink-faint);
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connecting .dot {
+    animation: none;
+  }
+}
+
+/* A server that is switched off in the configuration. Its state is
+   truthfully "disconnected", but saying only that invites the question
+   of why it is not connecting. */
+.off {
+  opacity: 0.72;
+}

@@ -1,0 +1,36 @@
+.editor {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.listRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* The position matters for arguments — they are passed in order — so
+   it is shown rather than left to be counted. */
+.index {
+  width: 1.5em;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  text-align: right;
+}
+
+.key {
+  color: var(--accent);
+}
+
+.add {
+  justify-self: start;
+}
