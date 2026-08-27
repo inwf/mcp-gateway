@@ -329,12 +329,20 @@ func (c *Conn) sessionAndTimeout() (*mcp.ClientSession, time.Duration, error) {
 
 // dial builds the transport for the configured protocol and completes
 // the handshake.
+//
+// The child process and its stderr reader are returned alongside the
+// session because a stdio server has both and they have to be torn down
+// with it. A server reached over HTTP has neither, and returns nil for
+// both.
 func (c *Conn) dial(ctx context.Context, cfg config.MCPServer) (*mcp.ClientSession, *exec.Cmd, *stderrWriter, error) {
 	switch cfg.Transport {
 	case config.TransportStdio:
 		return c.dialStdio(ctx, cfg)
+	case config.TransportStreamableHTTP:
+		session, err := c.dialStreamableHTTP(ctx, cfg)
+		return session, nil, nil, err
 	default:
-		return nil, nil, nil, fmt.Errorf("%s: transport %q is not supported yet", c.name, cfg.Transport)
+		return nil, nil, nil, fmt.Errorf("%s: transport %q is not supported", c.name, cfg.Transport)
 	}
 }
 
@@ -360,6 +368,31 @@ func (c *Conn) dialStdio(ctx context.Context, cfg config.MCPServer) (*mcp.Client
 		return nil, nil, nil, fmt.Errorf("start %s (%s): %w", c.name, cfg.Command, err)
 	}
 	return session, cmd, stderr, nil
+}
+
+// dialStreamableHTTP connects to a server that is already running.
+//
+// Nothing is started and nothing has to be cleaned up, so a failure here
+// leaves no trace behind — unlike the stdio case, where a process may
+// have been spawned before the handshake failed.
+func (c *Conn) dialStreamableHTTP(ctx context.Context, cfg config.MCPServer) (*mcp.ClientSession, error) {
+	httpClient, err := httpClientFor(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("configure %s: %w", c.name, err)
+	}
+
+	session, err := c.newClient().Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:   cfg.URL,
+		HTTPClient: httpClient,
+
+		// The standalone SSE stream is left on: it is how the server
+		// reports that its tool or resource list changed, which is what
+		// the handlers in newClient act on.
+	}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("connect to %s (%s): %w", c.name, cfg.URL, err)
+	}
+	return session, nil
 }
 
 func (c *Conn) newClient() *mcp.Client {

@@ -7,13 +7,19 @@
 // tests, and [ServerConfig] produces a configuration pointing back at the
 // same binary.
 //
-// This keeps the tests hermetic — no network, no toolchain outside Go —
-// and fast, since there is nothing to build.
+// Tests that exercise the streamable HTTP transport need the same server
+// behind an HTTP endpoint instead, which [Handler] provides. It serves
+// the identical set of tools and resources, so a test can assert that
+// both transports reach the same server rather than two lookalikes.
+//
+// This keeps the tests hermetic — no server on the public internet, no
+// toolchain outside Go — and fast, since there is nothing to build.
 package testmcp
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -91,6 +97,18 @@ func ServerConfig(mode string) (config.MCPServer, error) {
 	}, nil
 }
 
+// Handler serves the same MCP server over the streamable HTTP transport,
+// for tests that put it behind an [net/http/httptest.Server].
+//
+// One server instance backs every session, which is what a real
+// deployment looks like and what makes a tool added at runtime by the
+// "grow" tool visible to the client that asked for it.
+func Handler(mode string) http.Handler {
+	server := newServer(mode)
+	return mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return server }, nil)
+}
+
 func serve(mode string) int {
 	if mode == ModeCrash {
 		fmt.Fprintln(os.Stderr, "cannot start: the flux capacitor is missing")
@@ -104,6 +122,17 @@ func serve(mode string) int {
 		fmt.Fprint(os.Stderr, "no newline at the end")
 	}
 
+	// Run returns once the client closes the connection, which is the
+	// normal way this process ends rather than a failure.
+	if err := newServer(mode).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		fmt.Fprintf(os.Stderr, "test server stopped: %v\n", err)
+	}
+	return 0
+}
+
+// newServer builds the server both transports serve, so that neither can
+// drift into testing a different thing from the other.
+func newServer(mode string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    ServerName,
 		Version: ServerVersion,
@@ -149,12 +178,7 @@ func serve(mode string) int {
 			})
 	}
 
-	// Run returns once the client closes the connection, which is the
-	// normal way this process ends rather than a failure.
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		fmt.Fprintf(os.Stderr, "test server stopped: %v\n", err)
-	}
-	return 0
+	return server
 }
 
 // EchoInput is the argument shape of the echo tool.
