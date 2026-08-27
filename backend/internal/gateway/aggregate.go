@@ -90,24 +90,35 @@ func emptyObjectSchema() map[string]any {
 // down. Substituting a permissive schema keeps the tool callable and
 // contains the damage to that one tool's argument validation.
 func normalizeInputSchema(schema any) any {
-	if schema == nil {
-		return emptyObjectSchema()
+	// The original is passed through rather than the decoded copy, so a
+	// tool's schema reaches clients exactly as its server published it.
+	if _, ok := decodeObjectSchema(schema); ok {
+		return schema
 	}
+	return emptyObjectSchema()
+}
 
-	// The schema arrives as whatever the upstream sent, so it has to be
-	// inspected through its JSON form rather than by type assertion.
+// decodeObjectSchema reports whether schema describes a JSON object, and
+// returns it as a map when it does.
+//
+// The schema arrives as whatever the upstream sent, so it has to be
+// inspected through its JSON form rather than by type assertion.
+func decodeObjectSchema(schema any) (map[string]any, bool) {
+	if schema == nil {
+		return nil, false
+	}
 	encoded, err := json.Marshal(schema)
 	if err != nil {
-		return emptyObjectSchema()
+		return nil, false
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		return emptyObjectSchema()
+		return nil, false
 	}
 	if decoded["type"] != "object" {
-		return emptyObjectSchema()
+		return nil, false
 	}
-	return schema
+	return decoded, true
 }
 
 // FilterTools drops the tools a server's configuration does not expose.

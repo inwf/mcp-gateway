@@ -108,7 +108,17 @@ type getToolOutput struct {
 	Name        string `json:"name"`
 	Exposed     string `json:"exposed"`
 	Description string `json:"description,omitempty"`
-	InputSchema any    `json:"inputSchema,omitempty"`
+
+	// InputSchema is a map rather than `any` because the SDK generates
+	// this tool's output schema from these field types, and `any` becomes
+	// the JSON Schema `true`.
+	//
+	// `true` is a legal schema — the one that accepts everything — but the
+	// TypeScript MCP SDK validates each entry under "properties" as an
+	// object and rejects a boolean there. It fails the whole tools/list
+	// response, not just this field, so a single `any` here makes every
+	// tool the gateway offers invisible to any client built on that SDK.
+	InputSchema map[string]any `json:"inputSchema,omitempty"`
 }
 
 // ===== call_tool =====
@@ -314,12 +324,22 @@ func getTool(ups Upstreams, server, tool string) (getToolOutput, error) {
 			continue
 		}
 		exposed, _ := BuildNames(all).Exposed(server, tool)
+
+		// The declared type says this is an object, so an upstream that
+		// published something else must not be forwarded verbatim: the
+		// SDK validates structured results against the schema it
+		// generated, and a mismatch would fail the call.
+		schema, ok := decodeObjectSchema(candidate.InputSchema)
+		if !ok {
+			schema = emptyObjectSchema()
+		}
+
 		return getToolOutput{
 			Server:      server,
 			Name:        candidate.Name,
 			Exposed:     exposed,
 			Description: candidate.Description,
-			InputSchema: candidate.InputSchema,
+			InputSchema: schema,
 		}, nil
 	}
 	return getToolOutput{}, fmt.Errorf("server %q has no tool named %q", server, tool)
