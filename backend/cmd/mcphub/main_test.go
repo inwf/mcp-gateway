@@ -109,14 +109,91 @@ func TestAnUnexpectedArgumentIsAUsageError(t *testing.T) {
 	}
 }
 
+// Help that was asked for is output, not a diagnostic: it goes to
+// standard output so it can be piped to a pager, and standard error
+// stays empty. Usage text printed *because of* a mistake is the other
+// case, and is covered by the usage-error tests above.
 func TestHelpExitsSuccessfully(t *testing.T) {
-	code, _, stderr := execute(t, "-h")
+	code, stdout, stderr := execute(t, "-h")
 
 	if code != exitOK {
 		t.Errorf("exit code = %d, want %d", code, exitOK)
 	}
-	if !strings.Contains(stderr, "data-dir") {
-		t.Errorf("usage text does not mention --data-dir:\n%s", stderr)
+	if !strings.Contains(stdout, "data-dir") {
+		t.Errorf("help does not mention --data-dir:\n%s", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("requested help wrote to standard error:\n%s", stderr)
+	}
+}
+
+// The help text has to name the subcommands, or there is no way to
+// discover them.
+func TestHelpListsTheSubcommands(t *testing.T) {
+	code, stdout, _ := execute(t, "--help")
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d", code, exitOK)
+	}
+	for _, name := range []string{"serve", "check", "version"} {
+		if !strings.Contains(stdout, name) {
+			t.Errorf("help does not list the %q command:\n%s", name, stdout)
+		}
+	}
+}
+
+// A subcommand carries its own help, which is where anything specific to
+// it belongs.
+func TestSubcommandHelpIsAvailable(t *testing.T) {
+	code, stdout, stderr := execute(t, "serve", "--help")
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "serve") {
+		t.Errorf("serve --help does not describe the command:\n%s", stdout)
+	}
+	// The shared flags are declared once on the root and have to reach
+	// every subcommand, or they would only work before the subcommand.
+	if !strings.Contains(stdout, "data-dir") {
+		t.Errorf("serve --help does not offer the inherited --data-dir flag:\n%s", stdout)
+	}
+}
+
+// The version subcommand and the version flag are two spellings of one
+// thing, and must not drift apart.
+func TestVersionSubcommandMatchesTheFlag(t *testing.T) {
+	codeFlag, fromFlag, _ := execute(t, "--version")
+	codeCmd, fromCmd, _ := execute(t, "version")
+
+	if codeFlag != exitOK || codeCmd != exitOK {
+		t.Fatalf("exit codes = %d and %d, want %d", codeFlag, codeCmd, exitOK)
+	}
+	if fromFlag != fromCmd {
+		t.Errorf("--version printed %q but the version subcommand printed %q",
+			fromFlag, fromCmd)
+	}
+}
+
+// The shared flags are declared on the root, so they have to work in
+// either position — and a reader will try both.
+func TestGlobalFlagsWorkBeforeAndAfterTheSubcommand(t *testing.T) {
+	dir := isolated(t)
+
+	before, stdout, stderr := execute(t, "--data-dir", dir, "check")
+	if before != exitOK {
+		t.Fatalf("flag before the subcommand: exit %d\nstderr: %s", before, stderr)
+	}
+	if got := fieldValue(t, stdout, "data dir"); got != dir {
+		t.Errorf("data dir = %q, want %q", got, dir)
+	}
+
+	after, stdout, stderr := execute(t, "check", "--data-dir", dir)
+	if after != exitOK {
+		t.Fatalf("flag after the subcommand: exit %d\nstderr: %s", after, stderr)
+	}
+	if got := fieldValue(t, stdout, "data dir"); got != dir {
+		t.Errorf("data dir = %q, want %q", got, dir)
 	}
 }
 
@@ -323,6 +400,51 @@ func TestReportIsNotPollutedByLogOutput(t *testing.T) {
 	if strings.Contains(stdout, "level=") || strings.Contains(stdout, "startup self-check") {
 		t.Errorf("log records leaked into the report:\n%s", stdout)
 	}
+}
+
+// Running mcphub with no subcommand serves, which is the behaviour the
+// command tree has to preserve.
+//
+// Serving cannot be started here without binding a port, so this asserts
+// it through a configuration both paths reject: if the bare command took
+// a different path it would not fail, or would fail differently.
+func TestNoSubcommandTakesTheSamePathAsServe(t *testing.T) {
+	write := func(t *testing.T) string {
+		t.Helper()
+		dir := isolated(t)
+		path := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(path, []byte("version: 1\nlisten:\n  port: 70000\n"), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		return dir
+	}
+
+	bareCode, _, bareErr := execute(t, "--data-dir", write(t))
+	serveCode, _, serveErr := execute(t, "serve", "--data-dir", write(t))
+
+	if bareCode != exitFailure {
+		t.Errorf("bare command exit = %d, want %d", bareCode, exitFailure)
+	}
+	if serveCode != bareCode {
+		t.Errorf("exit codes differ: bare = %d, serve = %d", bareCode, serveCode)
+	}
+	if !strings.Contains(bareErr, "listen.port") {
+		t.Errorf("bare command did not report the invalid field:\n%s", bareErr)
+	}
+	// The temporary directories differ, so compare the part that does not
+	// name a path.
+	if trim, trimServe := afterLastPathSep(bareErr), afterLastPathSep(serveErr); trim != trimServe {
+		t.Errorf("the two paths failed differently:\n bare: %s\nserve: %s", trim, trimServe)
+	}
+}
+
+// afterLastPathSep drops everything up to the last path separator, which
+// is what varies between two runs in different temporary directories.
+func afterLastPathSep(s string) string {
+	if i := strings.LastIndex(s, string(filepath.Separator)); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }
 
 func TestInvalidConfigIsRejectedWithTheFieldNamed(t *testing.T) {
