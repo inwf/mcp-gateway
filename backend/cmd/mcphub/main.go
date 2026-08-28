@@ -65,6 +65,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
+	// A command that has already reported the problem itself only needs
+	// the exit code. Printing "mcphub: " and an empty message after a
+	// list of validation problems would say nothing and look like a
+	// second, mysterious failure.
+	if errors.Is(err, errSilent) {
+		return exitFailure
+	}
+
 	fmt.Fprintf(stderr, "mcphub: %v\n", err)
 
 	var usage *usageError

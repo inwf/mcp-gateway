@@ -48,7 +48,10 @@ func newServersCommand(global *globalOptions, stdout io.Writer) *cobra.Command {
 	}
 	client.bind(cmd.PersistentFlags())
 
-	cmd.AddCommand(newServersListCommand(client, stdout))
+	cmd.AddCommand(
+		newServersListCommand(client, stdout),
+		newServersAddCommand(client, stdout),
+	)
 	return cmd
 }
 
