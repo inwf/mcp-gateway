@@ -16,6 +16,11 @@ import (
 	"mcphub/internal/events"
 )
 
+// systemToolReadTimeout bounds the one in-process round trip that reads
+// the gateway's own tools back off its server. It talks to itself over a
+// pipe, so this only guards against a deadlock.
+const systemToolReadTimeout = 10 * time.Second
+
 // Options configures a [Gateway].
 type Options struct {
 	Version   string
@@ -62,6 +67,12 @@ type Gateway struct {
 	// publishedResources records the resource URIs currently on the
 	// server, for the same reason.
 	publishedResources map[string]string
+
+	// systemTools is the gateway's own tools, as the server actually
+	// publishes them. See [Gateway.SystemTools] for why they are read
+	// back rather than kept from registration.
+	systemToolsOnce sync.Once
+	systemTools     []*mcp.Tool
 
 	resync *debouncer
 }
@@ -144,16 +155,97 @@ func (g *Gateway) Handler() http.Handler {
 // Sessions lists the clients currently connected.
 func (g *Gateway) Sessions() []SessionInfo { return sessionsOf(g.server) }
 
-// PublishedTools lists the upstream tools currently on offer, under the
-// names clients see them by.
+// PublishedTools lists everything the gateway offers its clients: its own
+// tools first, then the forwarded upstream ones under the names clients
+// see them by.
 //
-// This covers the forwarded tools only. The gateway's own tools are
-// registered once and never change, and are listed by
-// [SystemToolNames].
+// This is what the management API reports, and it has to match what an
+// MCP client is actually served — the two are asserted equal by test.
 func (g *Gateway) PublishedTools() []*mcp.Tool {
 	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return slices.Clone(g.published)
+	forwarded := slices.Clone(g.published)
+	g.mu.RUnlock()
+
+	// The gateway's own tools come first, which is the order a reader
+	// wants: they are the ones that explain how to find the rest.
+	return append(g.SystemTools(), forwarded...)
+}
+
+// SystemTools returns the gateway's own tools as the server actually
+// publishes them, schemas included.
+//
+// They are read back from the server over an in-process session rather
+// than kept from registration. [mcp.AddTool] infers each schema from the
+// Go handler's argument type and does not write the result back into the
+// tool it was given, and the SDK offers no way to enumerate a server's
+// tools — so the alternatives were to hand-write the schemas (which would
+// drift from the Go types they describe) or to re-run the SDK's own
+// inference (which would be a copy of an internal code path). Asking the
+// server is the only answer that cannot be wrong.
+//
+// One round trip is enough for the lifetime of the gateway: the system
+// tools are registered once in [New] and never change afterwards, unlike
+// the forwarded tools that [Gateway.Sync] maintains.
+func (g *Gateway) SystemTools() []*mcp.Tool {
+	g.systemToolsOnce.Do(func() {
+		tools, err := g.readBackSystemTools()
+		if err != nil {
+			// A gateway that cannot describe its own tools still forwards
+			// everything else, so this is degraded rather than fatal.
+			g.log.Error("could not read back the gateway's own tools", "error", err)
+			return
+		}
+		g.systemTools = tools
+	})
+	return slices.Clone(g.systemTools)
+}
+
+// readBackSystemTools asks the server what it offers, and keeps the
+// entries that are the gateway's own.
+func (g *Gateway) readBackSystemTools() ([]*mcp.Tool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), systemToolReadTimeout)
+	defer cancel()
+
+	clientSide, serverSide := mcp.NewInMemoryTransports()
+
+	serverSession, err := g.server.Connect(ctx, serverSide, nil)
+	if err != nil {
+		return nil, fmt.Errorf("connect the server side: %w", err)
+	}
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "mcphub-introspection"}, nil)
+	session, err := client.Connect(ctx, clientSide, nil)
+	if err != nil {
+		serverSession.Close()
+		return nil, fmt.Errorf("connect the client side: %w", err)
+	}
+
+	// The session is torn down before returning, and the teardown is
+	// waited for rather than merely started. The API reports connected
+	// sessions, and an introspection session that was still closing would
+	// show up there as a client — a lie in the one place an operator looks
+	// to see who is connected.
+	defer func() {
+		session.Close()
+		serverSession.Close()
+		serverSession.Wait()
+	}()
+
+	var tools []*mcp.Tool
+	for tool, err := range session.Tools(ctx, nil) {
+		if err != nil {
+			return nil, fmt.Errorf("list tools: %w", err)
+		}
+		if IsSystemTool(tool.Name) {
+			tools = append(tools, tool)
+		}
+	}
+
+	if len(tools) != len(SystemToolNames) {
+		return nil, fmt.Errorf("the server published %d of the %d gateway tools",
+			len(tools), len(SystemToolNames))
+	}
+	return tools, nil
 }
 
 // Watch keeps the exposed tools in step with the upstream servers until
