@@ -320,3 +320,39 @@ func TestAnArgumentValueMayContainAnEqualsSign(t *testing.T) {
 		t.Errorf("query = %#v, want %#v", got, want)
 	}
 }
+
+// Real servers write long descriptions — the official filesystem server's
+// run past 300 characters — and an untruncated column wraps across
+// several terminal lines each, which destroys the list as a list.
+func TestToolDescriptionsAreShortenedForTheList(t *testing.T) {
+	long := strings.Repeat("很长的说明文字。", 60)
+
+	got := summarise(long)
+	if len([]rune(got)) > descriptionWidth+1 {
+		t.Errorf("summarise returned %d runes, want at most %d plus the ellipsis",
+			len([]rune(got)), descriptionWidth)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("a shortened description does not say it was shortened: %q", got)
+	}
+	// Cutting by bytes would leave a replacement character at the end.
+	if strings.ContainsRune(got, '�') {
+		t.Errorf("a multi-byte character was cut in half: %q", got)
+	}
+}
+
+func TestAShortDescriptionIsLeftAlone(t *testing.T) {
+	if got := summarise("returns its argument"); got != "returns its argument" {
+		t.Errorf("summarise changed a short description to %q", got)
+	}
+}
+
+func TestAMultiLineDescriptionKeepsOnlyItsFirstLine(t *testing.T) {
+	got := summarise("first line\nsecond line")
+	if strings.Contains(got, "second") {
+		t.Errorf("the second line survived: %q", got)
+	}
+	if !strings.Contains(got, "first line") {
+		t.Errorf("the first line was lost: %q", got)
+	}
+}

@@ -136,7 +136,7 @@ func printTools(stdout io.Writer, tools []aggregatedTool, server, search string)
 
 	rows := newTable(stdout, "NAME", "SERVER", "DESCRIPTION")
 	for _, tool := range tools {
-		rows.row(tool.Exposed, tool.Server, oneLine(tool.Description))
+		rows.row(tool.Exposed, tool.Server, summarise(tool.Description))
 	}
 	rows.flush()
 
@@ -146,14 +146,31 @@ func printTools(stdout io.Writer, tools []aggregatedTool, server, search string)
 	return nil
 }
 
-// oneLine keeps a multi-line description from breaking the table. The
-// full text is what `tools call --help`-style inspection is for; a list
-// only has room for the first line.
-func oneLine(s string) string {
-	if line, _, found := strings.Cut(s, "\n"); found {
-		return strings.TrimSpace(line) + " …"
+// descriptionWidth bounds the last column of the tool list.
+//
+// Real servers write long descriptions — the official filesystem server's
+// run past 300 characters — and an untruncated column wraps across
+// several terminal lines each, which destroys the list as a list. The
+// first sentence is what a list is for; `get_tool` is where the full text
+// lives.
+const descriptionWidth = 96
+
+// summarise reduces a description to one short line.
+func summarise(s string) string {
+	line, _, multiline := strings.Cut(s, "\n")
+	line = strings.TrimSpace(line)
+
+	// Counting runes rather than bytes: a description may be in any
+	// language, and cutting a multi-byte character in half produces a
+	// replacement character rather than a shorter line.
+	runes := []rune(line)
+	if len(runes) > descriptionWidth {
+		return strings.TrimSpace(string(runes[:descriptionWidth])) + "…"
 	}
-	return s
+	if multiline {
+		return line + " …"
+	}
+	return line
 }
 
 // ===== tools call =====
