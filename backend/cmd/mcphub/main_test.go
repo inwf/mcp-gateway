@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mcphub/internal/config"
 	"mcphub/internal/testmcp"
@@ -22,16 +23,22 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// execute runs the command and returns its exit code and streams.
+// commandTimeout bounds a command run from a test.
 //
-// The context is already cancelled: none of these tests exercise
-// serving, and a cancelled context makes it impossible for one to block
-// by accident if it did.
+// It replaces what used to be an already-cancelled context. That was a
+// safety net against a test accidentally starting the server and blocking
+// forever, and it worked while no command did any real work. The client
+// commands do: they make HTTP requests under the command's context, and a
+// cancelled one fails them before they start. A deadline keeps the safety
+// net without lying about the context.
+const commandTimeout = 60 * time.Second
+
+// execute runs the command and returns its exit code and streams.
 func execute(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
 
 	var out, errOut bytes.Buffer
 	code = run(ctx, args, &out, &errOut)
