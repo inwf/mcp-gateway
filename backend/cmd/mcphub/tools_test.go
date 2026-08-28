@@ -1,0 +1,322 @@
+package main
+
+import (
+	"strings"
+	"testing"
+
+	"mcphub/internal/config"
+	"mcphub/internal/testmcp"
+)
+
+// withTestServer starts a gateway with the test MCP server attached under
+// the given name and waits until its tools have been listed.
+func withTestServer(t *testing.T, name string) (address string, cleanup func()) {
+	t.Helper()
+
+	base, stop, done := running(t, func(cfg *config.Config) {
+		upstream, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		cfg.MCPServers = map[string]config.MCPServer{name: upstream}
+	})
+
+	address = hostPort(t, base)
+	waitForState(t, address, name, "connected")
+	return address, func() { stop(); <-done }
+}
+
+func TestToolsListShowsTheExposedNames(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "list", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	for _, want := range []string{"NAME", "SERVER", "probe_echo", "probe"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("output does not contain %q:\n%s", want, stdout)
+		}
+	}
+	// The exposed name is what a client calls, so the bare name alone
+	// would be the wrong thing to print.
+	row := rowFor(t, stdout, "probe_echo")
+	if !strings.Contains(row, "returns its argument") {
+		t.Errorf("the description is missing from the row: %q", row)
+	}
+}
+
+func TestToolsListCanFilterByServer(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, _ := execute(t, "tools", "list", "--server", "nowhere", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stdout, "nowhere") {
+		t.Errorf("output does not name the server that has nothing:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "probe_echo") {
+		t.Errorf("a tool from another server survived the filter:\n%s", stdout)
+	}
+}
+
+func TestToolsListSearchRanksMatches(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "list", "--search", "echo", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "probe_echo") {
+		t.Errorf("the matching tool is missing:\n%s", stdout)
+	}
+}
+
+func TestToolsCallReturnsWhatTheToolSaid(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "call", "probe_echo",
+		"--arg", "message=hello from the cli", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "hello from the cli") {
+		t.Errorf("the tool's answer is missing:\n%s", stdout)
+	}
+}
+
+// The bare tool name is a convenience, and it has to reach the same tool
+// as the exposed name.
+func TestToolsCallAcceptsTheBareToolName(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "call", "echo",
+		"--arg", "message=bare", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "bare") {
+		t.Errorf("the tool's answer is missing:\n%s", stdout)
+	}
+}
+
+// Two servers offering the same tool make a bare name ambiguous, and
+// guessing would silently call the wrong one.
+func TestToolsCallRefusesAnAmbiguousBareName(t *testing.T) {
+	base, stop, done := running(t, func(cfg *config.Config) {
+		upstream, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		cfg.MCPServers = map[string]config.MCPServer{"one": upstream, "two": upstream}
+	})
+	defer func() { stop(); <-done }()
+
+	address := hostPort(t, base)
+	waitForState(t, address, "one", "connected")
+	waitForState(t, address, "two", "connected")
+
+	code, _, stderr := execute(t, "tools", "call", "echo",
+		"--arg", "message=x", "--address", address)
+
+	if code != exitFailure {
+		t.Errorf("exit code = %d, want %d", code, exitFailure)
+	}
+	for _, want := range []string{"one_echo", "two_echo"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the message does not offer %q:\n%s", want, stderr)
+		}
+	}
+}
+
+func TestToolsCallSuggestsNamesForATypo(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, _, stderr := execute(t, "tools", "call", "ech", "--address", address)
+
+	if code != exitFailure {
+		t.Errorf("exit code = %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(stderr, "probe_echo") {
+		t.Errorf("no suggestion was offered:\n%s", stderr)
+	}
+}
+
+// A tool that ran and reported a problem is a failed command: a script
+// that ignored this would treat the error text as an answer.
+func TestToolsCallFailsWhenTheToolReportsAnError(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, _ := execute(t, "tools", "call", "probe_fail", "--address", address)
+
+	if code != exitFailure {
+		t.Errorf("exit code = %d, want %d", code, exitFailure)
+	}
+	// What the tool said still has to be shown; the exit code alone does
+	// not tell anyone what went wrong.
+	if !strings.Contains(stdout, "this tool always fails") {
+		t.Errorf("the tool's message was not printed:\n%s", stdout)
+	}
+}
+
+func TestToolsCallAcceptsAJSONObject(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "call", "probe_echo",
+		"--args", `{"message":"from json"}`, "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "from json") {
+		t.Errorf("the tool's answer is missing:\n%s", stdout)
+	}
+}
+
+// Both ways of giving arguments can be used at once, and the explicit
+// pair is the more specific instruction.
+func TestToolsCallLetsAPairOverrideTheJSON(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "call", "probe_echo",
+		"--args", `{"message":"from json"}`,
+		"--arg", "message=from the pair",
+		"--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "from the pair") {
+		t.Errorf("the pair did not override the JSON:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "from json") {
+		t.Errorf("the overridden value was sent as well:\n%s", stdout)
+	}
+}
+
+func TestToolsCallRejectsMalformedArguments(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	for _, badArgs := range []struct {
+		name  string
+		flags []string
+	}{
+		{"not JSON", []string{"--args", "{oops"}},
+		{"not an object", []string{"--args", `["a"]`}},
+		{"no equals sign", []string{"--arg", "message"}},
+	} {
+		t.Run(badArgs.name, func(t *testing.T) {
+			args := append([]string{"tools", "call", "probe_echo"}, badArgs.flags...)
+			code, _, stderr := execute(t, append(args, "--address", address)...)
+
+			if code == exitOK {
+				t.Errorf("the command succeeded with %s arguments", badArgs.name)
+			}
+			if stderr == "" {
+				t.Error("nothing was written to standard error")
+			}
+		})
+	}
+}
+
+// ===== argument typing =====
+
+// Everything on a command line is a string, but a tool that wants a
+// number and is handed "5" rejects it. These cover the conversion that
+// the declared schema type drives.
+func TestArgumentsAreConvertedUsingTheSchema(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"count":   map[string]any{"type": "integer"},
+			"ratio":   map[string]any{"type": "number"},
+			"enabled": map[string]any{"type": "boolean"},
+			"label":   map[string]any{"type": "string"},
+			"items":   map[string]any{"type": "array"},
+		},
+	}
+
+	arguments, err := buildArguments("", []string{
+		"count=5", "ratio=1.5", "enabled=true", "label=5", "items=[1,2]",
+	}, schema)
+	if err != nil {
+		t.Fatalf("buildArguments: %v", err)
+	}
+
+	if got, want := arguments["count"], int64(5); got != want {
+		t.Errorf("count = %#v, want %#v", got, want)
+	}
+	if got, want := arguments["ratio"], 1.5; got != want {
+		t.Errorf("ratio = %#v, want %#v", got, want)
+	}
+	if got := arguments["enabled"]; got != true {
+		t.Errorf("enabled = %#v, want true", got)
+	}
+	// The same text, declared as a string, must stay a string.
+	if got, want := arguments["label"], "5"; got != want {
+		t.Errorf("label = %#v, want %#v — a declared string must not become a number", got, want)
+	}
+	if _, ok := arguments["items"].([]any); !ok {
+		t.Errorf("items = %#v, want a list", arguments["items"])
+	}
+}
+
+func TestAValueThatContradictsTheSchemaIsRejected(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{"count": map[string]any{"type": "integer"}},
+	}
+
+	_, err := buildArguments("", []string{"count=lots"}, schema)
+	if err == nil {
+		t.Fatal("buildArguments accepted a word where the schema asks for an integer")
+	}
+	if !strings.Contains(err.Error(), "count") {
+		t.Errorf("the error does not name the argument: %v", err)
+	}
+}
+
+// With nothing declared, a value that looks like JSON is read as JSON and
+// anything else stays text. Otherwise every bare word would be an error.
+func TestAnUndeclaredArgumentFallsBackToJSONThenText(t *testing.T) {
+	arguments, err := buildArguments("", []string{"n=7", "word=hello", "flag=false"}, nil)
+	if err != nil {
+		t.Fatalf("buildArguments: %v", err)
+	}
+
+	if got, want := arguments["n"], float64(7); got != want {
+		t.Errorf("n = %#v, want %#v", got, want)
+	}
+	if got, want := arguments["word"], "hello"; got != want {
+		t.Errorf("word = %#v, want %#v", got, want)
+	}
+	if got := arguments["flag"]; got != false {
+		t.Errorf("flag = %#v, want false", got)
+	}
+}
+
+// A value containing an equals sign belongs to the value, not to the
+// split: query strings and base64 both routinely contain one.
+func TestAnArgumentValueMayContainAnEqualsSign(t *testing.T) {
+	arguments, err := buildArguments("", []string{"query=a=1&b=2"}, nil)
+	if err != nil {
+		t.Fatalf("buildArguments: %v", err)
+	}
+	if got, want := arguments["query"], "a=1&b=2"; got != want {
+		t.Errorf("query = %#v, want %#v", got, want)
+	}
+}

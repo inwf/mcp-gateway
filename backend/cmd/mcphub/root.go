@@ -92,6 +92,7 @@ func newRootCommand(stdout, stderr io.Writer, web fs.FS) *cobra.Command {
 		newServeCommand(&global, web, stdout, stderr),
 		newCheckCommand(&global, stdout),
 		newServersCommand(&global, stdout),
+		newToolsCommand(&global, stdout),
 		newVersionCommand(stdout),
 	)
 	return root
