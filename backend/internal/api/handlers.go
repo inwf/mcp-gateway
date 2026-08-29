@@ -60,6 +60,23 @@ func queryInt(c *gin.Context, name string, fallback int) (int, error) {
 	return value, nil
 }
 
+// queryBool reads a boolean query parameter.
+//
+// Only the spellings a person would type are accepted. Treating anything
+// unrecognised as false would make a typo in a parameter that guards
+// something look like a deliberate "no".
+func queryBool(c *gin.Context, name string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, BadRequest(fmt.Sprintf("%s must be true or false, not %q", name, raw))
+	}
+	return value, nil
+}
+
 // queryTime reads an RFC 3339 timestamp query parameter.
 func queryTime(c *gin.Context, name string) (time.Time, error) {
 	raw := strings.TrimSpace(c.Query(name))

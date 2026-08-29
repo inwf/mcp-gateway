@@ -103,3 +103,9 @@
 .fieldMessage {
   color: var(--ink-muted);
 }
+
+/* Pushes the export control to the end of the path row, so the path
+   itself stays where the eye expects it. */
+.pathSpacer {
+  flex: 1;
+}

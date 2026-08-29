@@ -228,6 +228,7 @@ func (a *API) registerRoutes(api gin.IRoutes) {
 	api.GET("/config", a.handleGetConfig)
 	api.PUT("/config", a.handlePutConfig)
 	api.POST("/config/validate", a.handleValidateConfig)
+	api.GET("/config/export", a.handleExportConfig)
 
 	// Servers, and what each one offers.
 	api.GET("/servers", a.handleListServers)

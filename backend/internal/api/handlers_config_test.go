@@ -3,7 +3,9 @@ package api_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"mcphub/internal/api"
 	"mcphub/internal/config"
@@ -301,5 +303,104 @@ func TestTheChangeListIsAlwaysAList(t *testing.T) {
 	if len(result.Changes) != 0 {
 		t.Errorf("saving an unchanged configuration reported %d changes: %+v",
 			len(result.Changes), result.Changes)
+	}
+}
+
+// ===== step 109: exporting =====
+
+// The export is a file, not a view: it goes to disk under a name, and the
+// bytes are the ones the gateway would have written itself.
+
+func TestTheExportIsOfferedAsAFile(t *testing.T) {
+	h := start(t, nil)
+
+	resp := h.get(t, "/api/config/export")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	disposition := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(disposition, "attachment") {
+		t.Errorf("Content-Disposition = %q; a browser would show it rather than save it", disposition)
+	}
+	// The extension matters: this is the format the gateway reads, so the
+	// download should be droppable straight back into a data directory.
+	if !strings.Contains(disposition, ".yaml") {
+		t.Errorf("Content-Disposition = %q, want a .yaml filename", disposition)
+	}
+}
+
+// What comes down has to be a configuration this build can read back. An
+// export that needs editing before it loads is not a backup.
+func TestTheExportLoadsBackIn(t *testing.T) {
+	h := start(t, nil)
+
+	body := bodyOf(t, h.get(t, "/api/config/export"))
+
+	parsed, err := config.Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("the export does not parse as a configuration: %v\n%s", err, body)
+	}
+	if parsed.Version != config.CurrentVersion {
+		t.Errorf("version = %d, want %d", parsed.Version, config.CurrentVersion)
+	}
+}
+
+// The two uses are different and conflating them fails one of them: a
+// configuration meant for a bug report must not carry an API token, and
+// one meant as a backup is useless without them.
+func TestSecretsAreHiddenUnlessAskedFor(t *testing.T) {
+	const token = "sk-not-a-real-token"
+
+	h := start(t, func(opts *api.Options) {
+		opts.Configs = configs(t, func(cfg *config.Config) {
+			cfg.MCPServers = map[string]config.MCPServer{
+				"remote": {
+					Transport: config.TransportStreamableHTTP,
+					URL:       "https://example.com/mcp",
+					Headers:   map[string]string{"Authorization": token},
+					Enabled:   true,
+					Timeout:   time.Minute,
+				},
+			}
+		})
+	})
+
+	plain := bodyOf(t, h.get(t, "/api/config/export"))
+	if strings.Contains(plain, token) {
+		t.Error("the default export carries the token")
+	}
+
+	withSecrets := bodyOf(t, h.get(t, "/api/config/export?secrets=true"))
+	if !strings.Contains(withSecrets, token) {
+		t.Errorf("an export asked for with its secrets does not carry the token:\n%s", withSecrets)
+	}
+}
+
+// A typo in the parameter that decides whether secrets come out must not
+// read as a deliberate "no": the caller would get a file they believe is
+// a backup and is not.
+func TestAMisspeltSecretsParameterIsRefused(t *testing.T) {
+	h := start(t, nil)
+
+	resp := h.get(t, "/api/config/export?secrets=yes-please")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+// Asking for secrets is worth a line in the log: it is the one request
+// that hands credentials to whoever made it.
+func TestExportingSecretsIsLogged(t *testing.T) {
+	h := start(t, nil)
+
+	h.get(t, "/api/config/export")
+	if strings.Contains(logText(h.Logs), "exported with its secrets") {
+		t.Error("a redacted export was logged as carrying secrets")
+	}
+
+	h.get(t, "/api/config/export?secrets=true")
+	if !strings.Contains(logText(h.Logs), "exported with its secrets") {
+		t.Errorf("exporting the secrets was not logged:\n%s", logText(h.Logs))
 	}
 }

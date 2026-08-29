@@ -146,3 +146,48 @@ func (a *API) handleValidateConfig(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"valid": true, "fields": []FieldError{}})
 }
+
+// exportFilename is what the browser saves the configuration as. The
+// extension matters: this is the file format the gateway reads, so a
+// download should be droppable straight back into a data directory.
+const exportFilename = "mcphub-config.yaml"
+
+// handleExportConfig sends the configuration as a file.
+//
+// Secrets are hidden unless they are asked for. The two are different
+// things and conflating them fails one of them: a configuration meant for
+// a bug report must not carry an API token, and one meant as a backup is
+// useless without them. Neither can be the silent default, so the
+// parameter is explicit and the caller chooses.
+func (a *API) handleExportConfig(c *gin.Context) {
+	cfg := a.opts.Configs.Get()
+
+	withSecrets, err := queryBool(c, "secrets", false)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	if !withSecrets {
+		cfg = cfg.Redact()
+	}
+
+	// The same encoder the gateway writes its configuration file with, so
+	// that what is downloaded is what would have been on disk.
+	encoded, err := config.Marshal(cfg)
+	if err != nil {
+		fail(c, &Error{
+			Code:    CodeInternal,
+			Message: "the configuration could not be encoded",
+			cause:   err,
+		})
+		return
+	}
+
+	if withSecrets {
+		a.log.Warn("the configuration was exported with its secrets",
+			"requestId", RequestID(c), "client", c.ClientIP())
+	}
+
+	c.Header("Content-Disposition", `attachment; filename="`+exportFilename+`"`)
+	c.Data(http.StatusOK, "application/yaml; charset=utf-8", encoded)
+}

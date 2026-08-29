@@ -27,14 +27,27 @@ const configDirMode os.FileMode = 0o700
 // Save does not validate cfg. Callers persisting user input should call
 // [Config.Validate] first.
 func Save(path string, cfg Config) error {
-	data, err := yaml.Marshal(cfg)
+	data, err := Marshal(cfg)
 	if err != nil {
-		return fmt.Errorf("encode config: %w", err)
+		return err
 	}
 	if err := writeFileAtomic(path, data); err != nil {
 		return fmt.Errorf("write config %s: %w", path, err)
 	}
 	return nil
+}
+
+// Marshal encodes a configuration in the form [Save] writes it.
+//
+// Exported so that anything handing a configuration to a user — a
+// download, a printed dump — produces the same bytes that would have been
+// on disk, rather than a second rendering that could differ from it.
+func Marshal(cfg Config) ([]byte, error) {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("encode config: %w", err)
+	}
+	return data, nil
 }
 
 // writeFileAtomic writes data to path by way of a temporary file that is

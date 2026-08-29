@@ -5,6 +5,8 @@ import { TRANSPORTS, type FieldError, type MCPServer, type Transport } from '@/a
 import { ApiError } from '@/api/client';
 import { useServerActions } from '@/hooks/use-server-actions';
 import { KeyValueEditor, StringListEditor } from '@/components/KeyValueEditor';
+import { readPastedServer, withServerDefaults } from '@/lib/server-json';
+import { ExposedToolsEditor } from '@/components/ExposedToolsEditor';
 
 /*
  * Adding and editing a server.
@@ -105,6 +107,19 @@ function serverFrom(values: ServerFormValues): MCPServer {
   }
 
   return server;
+}
+
+/** Turns the reader's failure into something on screen. A parse failure
+ *  carries the parser's own message, which names the position. */
+function jsonMessage(t: (key: string) => string, reason: string): string {
+  switch (reason) {
+    case 'jsonNotAnObject':
+      return t('form.jsonNotAnObject');
+    case 'jsonOneServer':
+      return t('form.jsonOneServer');
+    default:
+      return `${t('call.invalidJson')} — ${reason}`;
+  }
 }
 
 /** The form's own field names, for recognising which of the gateway's
@@ -208,35 +223,91 @@ function FormBody({
   const [transport, setTransport] = useState<Transport>(initial.transport);
   const [failure, setFailure] = useState<string | null>(null);
 
+  // The form and the JSON editor are two views of one server, not two
+  // forms. Switching either way carries whatever is currently entered.
+  const [mode, setMode] = useState<'form' | 'json'>('form');
+  const [json, setJson] = useState('');
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
   const spawns = transport === 'stdio';
+
+  const showJSON = () => {
+    // getFieldsValue rather than validateFields: switching to the JSON
+    // view is not submitting, and someone who reaches for it because the
+    // form cannot express what they need should not first be made to
+    // satisfy the form.
+    setJson(JSON.stringify(serverFrom(form.getFieldsValue()), null, 2));
+    setJsonError(null);
+    setMode('json');
+  };
+
+  const showForm = () => {
+    let read: { name?: string; server: MCPServer };
+    try {
+      read = readPastedServer(json);
+    } catch (error) {
+      // Refusing to switch rather than switching and silently dropping
+      // the text: the text is the work, and the form cannot hold it.
+      setJsonError(jsonMessage(t, (error as Error).message));
+      return;
+    }
+
+    const name = editing ? editing.name : (read.name ?? form.getFieldValue('name') ?? '');
+    form.setFieldsValue(valuesFrom(String(name), withServerDefaults(read.server)));
+    setTransport(withServerDefaults(read.server).transport);
+    setJsonError(null);
+    setMode('form');
+  };
 
   const submit = async () => {
     // A form that does not validate is an expected outcome, not a
     // failure: antd has already marked the offending inputs, and
     // letting the rejection escape would put an unhandled rejection in
     // the console for someone leaving a required box empty.
-    let values: ServerFormValues;
-    try {
-      values = await form.validateFields();
-    } catch {
-      return;
+    let name: string;
+    let server: MCPServer;
+
+    if (mode === 'json') {
+      let read: { name?: string; server: MCPServer };
+      try {
+        read = readPastedServer(json);
+      } catch (error) {
+        setJsonError(jsonMessage(t, (error as Error).message));
+        return;
+      }
+      name = editing ? editing.name : (read.name ?? String(form.getFieldValue('name') ?? '')).trim();
+      server = read.server;
+
+      if (!name) {
+        setJsonError(t('form.required'));
+        return;
+      }
+    } else {
+      let values: ServerFormValues;
+      try {
+        values = await form.validateFields();
+      } catch {
+        return;
+      }
+      name = values.name.trim();
+      server = serverFrom(values);
     }
 
-    const server = serverFrom(values);
     setFailure(null);
+    setJsonError(null);
 
     try {
       if (editing) {
         await update.mutateAsync({ name: editing.name, server });
       } else {
-        await create.mutateAsync({ name: values.name.trim(), server });
+        await create.mutateAsync({ name, server });
       }
       void message.success(t('settings.saved'));
       onClose();
     } catch (error) {
       const failed = error instanceof ApiError ? error : null;
-      if (failed?.fields.length) {
-        form.setFields(markFields(failed.fields, editing?.name ?? values.name.trim()));
+      if (failed?.fields.length && mode === 'form') {
+        form.setFields(markFields(failed.fields, editing?.name ?? name));
       }
       setFailure(failed?.message ?? t('error.unknown'));
     }
@@ -255,6 +326,24 @@ function FormBody({
         />
       ) : null}
 
+      {/* Two ways of saying the same thing. The form is quicker for the
+          usual case; the JSON view is what someone reaches for when they
+          have a configuration in hand, or want to see exactly what will
+          be sent. */}
+      <Segmented
+        value={mode}
+        onChange={(next) => (next === 'json' ? showJSON() : showForm())}
+        options={[
+          { label: t('form.asForm'), value: 'form' },
+          { label: t('form.asJson'), value: 'json' },
+        ]}
+        block
+        style={{ marginBottom: 'var(--space-4)' }}
+      />
+
+      {/* The form stays mounted while the JSON view is showing, so that
+          switching back is instant and nothing entered is lost. */}
+      <div style={mode === 'json' ? { display: 'none' } : undefined}>
       <Form form={form} layout="vertical" initialValues={initial} requiredMark={false}>
         <Form.Item
           name="name"
@@ -344,18 +433,73 @@ function FormBody({
           <KeyValueEditor keyPlaceholder="env" valuePlaceholder="prod" />
         </Form.Item>
 
+        {/* Picking from what the server actually offers, rather than
+            typing names: the names are already known, and a typo in a
+            typed one silently exposes nothing. */}
         <Form.Item
           name="exposedTools"
           label={t('form.exposedTools')}
           extra={t('form.exposedToolsHint')}
         >
-          <StringListEditor />
+          <ExposedToolsEditor server={editing?.name} />
         </Form.Item>
 
         <Form.Item name="enabled" label={t('form.enabled')} valuePropName="checked">
           <Switch />
         </Form.Item>
       </Form>
+      </div>
+
+      {mode === 'json' ? (
+        <div>
+          <span className="label">{t('form.json')}</span>
+          <p
+            style={{
+              margin: 'var(--space-1) 0 var(--space-2)',
+              color: 'var(--ink-muted)',
+              fontSize: 'var(--text-sm)',
+              lineHeight: 1.6,
+            }}
+          >
+            {t('form.jsonHint')}
+          </p>
+          <textarea
+            className="mono"
+            value={json}
+            spellCheck={false}
+            onChange={(e) => {
+              setJson(e.target.value);
+              setJsonError(null);
+            }}
+            rows={18}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: 'var(--space-3)',
+              border: '1px solid var(--line-strong)',
+              borderRadius: 'var(--radius)',
+              background: 'var(--sunken)',
+              color: 'var(--ink)',
+              fontSize: 'var(--text-sm)',
+              lineHeight: 1.6,
+              resize: 'vertical',
+              tabSize: 2,
+            }}
+          />
+          {jsonError ? (
+            <span
+              style={{
+                display: 'block',
+                marginTop: 'var(--space-2)',
+                color: 'var(--danger)',
+                fontSize: 'var(--text-xs)',
+              }}
+            >
+              {jsonError}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div
         style={{
