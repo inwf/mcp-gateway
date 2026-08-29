@@ -146,6 +146,8 @@ export const zh = {
     call: '调用',
     schema: '参数结构',
     system: '系统工具',
+    fromServers: '服务器工具',
+    builtIn: '网关自带',
   },
 
   call: {

@@ -91,21 +91,21 @@ func containsFold(lowerHaystack, needle string) bool {
 	return strings.Contains(lowerHaystack, strings.ToLower(needle))
 }
 
-// sessionsOf reads the live sessions out of an MCP server, ordered by id
-// so that a list in the UI does not reshuffle between refreshes.
-func sessionsOf(server *mcp.Server) []SessionInfo {
-	out := []SessionInfo{}
-	for session := range server.Sessions() {
-		info := SessionInfo{ID: session.ID()}
-		if params := session.InitializeParams(); params != nil {
-			info.ProtocolVersion = params.ProtocolVersion
-			if params.ClientInfo != nil {
-				info.ClientName = params.ClientInfo.Name
-				info.ClientVersion = params.ClientInfo.Version
-			}
+// describe summarises one session for the management API.
+func describe(session *mcp.ServerSession) SessionInfo {
+	info := SessionInfo{ID: session.ID()}
+	if params := session.InitializeParams(); params != nil {
+		info.ProtocolVersion = params.ProtocolVersion
+		if params.ClientInfo != nil {
+			info.ClientName = params.ClientInfo.Name
+			info.ClientVersion = params.ClientInfo.Version
 		}
-		out = append(out, info)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return info
+}
+
+// sortSessions orders sessions by id, so that a list in the UI does not
+// reshuffle between refreshes.
+func sortSessions(sessions []SessionInfo) {
+	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID < sessions[j].ID })
 }

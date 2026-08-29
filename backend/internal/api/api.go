@@ -250,6 +250,7 @@ func (a *API) registerRoutes(api gin.IRoutes) {
 	api.GET("/gateway/status", a.handleGatewayStatus)
 	api.GET("/gateway/sessions", a.handleGatewaySessions)
 	api.GET("/gateway/tools", a.handleGatewayTools)
+	api.POST("/gateway/tools/:tool/call", a.handleCallGatewayTool)
 
 	// The log view.
 	api.GET("/logs", a.handleQueryLogs)

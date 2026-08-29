@@ -126,7 +126,12 @@ export function ToolCallDialog({
   }, [text]);
 
   const call = useMutation({
-    mutationFn: () => endpoints.callTool(server, tool?.name ?? '', parsed.value),
+    // No server means one of the gateway's own tools. Those belong to no
+    // server, so they are called through their own route.
+    mutationFn: () =>
+      server
+        ? endpoints.callTool(server, tool?.name ?? '', parsed.value)
+        : endpoints.callGatewayTool(tool?.name ?? '', parsed.value),
     onSuccess: setResult,
   });
 

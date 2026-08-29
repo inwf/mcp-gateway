@@ -80,11 +80,22 @@ export const endpoints = {
       .get<{ resources: Resource[] }>(`${BASE}/servers/${encodeURIComponent(name)}/resources`)
       .then((r) => r.resources),
 
+  // The arguments travel under a key rather than as the body itself.
+  // The gateway takes {"arguments": {...}} and rejects unknown fields, so
+  // posting the arguments bare fails the request before the tool is ever
+  // reached.
   callTool: (server: string, tool: string, args: unknown) =>
     api.post<ToolCallResult>(
       `${BASE}/servers/${encodeURIComponent(server)}/tools/${encodeURIComponent(tool)}/call`,
-      args,
+      { arguments: args },
     ),
+
+  // The gateway's own tools have a route of their own: they belong to no
+  // server, so there is no name to put in the path above.
+  callGatewayTool: (tool: string, args: unknown) =>
+    api.post<ToolCallResult>(`${BASE}/gateway/tools/${encodeURIComponent(tool)}/call`, {
+      arguments: args,
+    }),
 
   readResource: (server: string, uri: string) =>
     api.get<ResourceReadResult>(`${BASE}/servers/${encodeURIComponent(server)}/resource`, {

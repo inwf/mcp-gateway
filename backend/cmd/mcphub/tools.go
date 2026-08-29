@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"mcphub/internal/gateway"
 )
 
 // listLimit is what the CLI asks for when listing tools.
@@ -26,13 +29,45 @@ type toolListResponse struct {
 	Total int              `json:"total"`
 }
 
+// gatewayToolsResponse is what /gateway/tools answers: everything the
+// gateway offers a client, and the names of those that are its own.
+type gatewayToolsResponse struct {
+	Tools       []gatewayTool `json:"tools"`
+	SystemTools []string      `json:"systemTools"`
+}
+
+// gatewayTool is a tool as the MCP server publishes it. A gateway tool
+// has no server behind it, so this is all there is to say about one.
+type gatewayTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+}
+
 type aggregatedTool struct {
 	Server      string         `json:"server"`
 	Tool        string         `json:"tool"`
 	Exposed     string         `json:"exposed"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+
+	// system marks one of the gateway's own tools. They belong to no
+	// server, so they are listed apart and called by another route.
+	system bool
 }
+
+// toolSet is everything on offer, with the gateway's own tools kept
+// apart from the forwarded ones.
+type toolSet struct {
+	system   []aggregatedTool
+	upstream []aggregatedTool
+}
+
+func (s toolSet) all() []aggregatedTool {
+	return append(slices.Clone(s.system), s.upstream...)
+}
+
+func (s toolSet) empty() bool { return len(s.system) == 0 && len(s.upstream) == 0 }
 
 type toolCallResponse struct {
 	IsError           bool            `json:"isError"`
@@ -75,7 +110,9 @@ func newToolsListCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 		Short: "List the tools the gateway is offering",
 		Long: "List the tools the gateway currently offers, under the names a client\n" +
 			"sees them by. A tool a server has but the configuration does not expose\n" +
-			"is not listed, because it is not on offer.",
+			"is not listed, because it is not on offer.\n\n" +
+			"The gateway's own tools are listed first, apart from the forwarded ones:\n" +
+			"they belong to no server, and they are how a model finds everything else.",
 		Args: noPositionalArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			gateway, err := client.connect()
@@ -95,55 +132,143 @@ func newToolsListCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 	return cmd
 }
 
-func fetchTools(ctx context.Context, gateway *gatewayClient, search string) ([]aggregatedTool, error) {
+// fetchTools asks for everything on offer: the forwarded tools from the
+// aggregated endpoint, and the gateway's own from the endpoint that
+// reports what its MCP server publishes.
+//
+// Two calls, because the two kinds of tool are genuinely different
+// things: a forwarded tool has a server, a name on that server and a name
+// it is exposed under, and the gateway's own has none of those.
+func fetchTools(ctx context.Context, gateway *gatewayClient, search string) (toolSet, error) {
 	query := url.Values{}
 	query.Set("limit", strconv.Itoa(listLimit))
 	if search != "" {
 		query.Set("q", search)
 	}
 
-	var response toolListResponse
-	if err := gateway.get(ctx, "/tools?"+query.Encode(), &response); err != nil {
-		return nil, err
+	var forwarded toolListResponse
+	if err := gateway.get(ctx, "/tools?"+query.Encode(), &forwarded); err != nil {
+		return toolSet{}, err
 	}
-	return response.Tools, nil
+
+	system, err := fetchSystemTools(ctx, gateway, search)
+	if err != nil {
+		return toolSet{}, err
+	}
+
+	return toolSet{system: system, upstream: forwarded.Tools}, nil
 }
 
-func printTools(stdout io.Writer, tools []aggregatedTool, server, search string) error {
+func fetchSystemTools(ctx context.Context, gateway *gatewayClient, search string) ([]aggregatedTool, error) {
+	var response gatewayToolsResponse
+	if err := gateway.get(ctx, "/gateway/tools", &response); err != nil {
+		return nil, err
+	}
+
+	out := make([]aggregatedTool, 0, len(response.SystemTools))
+	for _, tool := range response.Tools {
+		if !slices.Contains(response.SystemTools, tool.Name) {
+			continue
+		}
+		// A gateway tool is offered under its own name, so the name a
+		// client calls and the name it is known by are the same one.
+		out = append(out, aggregatedTool{
+			Tool:        tool.Name,
+			Exposed:     tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+			system:      true,
+		})
+	}
+
+	// The aggregated endpoint ranks its own results, so these have to be
+	// ranked here to match — otherwise a search would filter one group and
+	// not the other.
+	if search != "" {
+		out = rankTools(search, out)
+	}
+	return out, nil
+}
+
+// rankTools applies the gateway's own ranking to a list the server did
+// not rank, so that both groups of a search answer the same question.
+func rankTools(search string, tools []aggregatedTool) []aggregatedTool {
+	byName := make(map[string]aggregatedTool, len(tools))
+	candidates := make([]gateway.Searchable, 0, len(tools))
+	for _, tool := range tools {
+		byName[tool.Exposed] = tool
+		candidates = append(candidates, gateway.Searchable{
+			Tool:        tool.Tool,
+			Exposed:     tool.Exposed,
+			Description: tool.Description,
+		})
+	}
+
+	hits := gateway.SearchTools(search, candidates, len(tools))
+	out := make([]aggregatedTool, 0, len(hits))
+	for _, hit := range hits {
+		out = append(out, byName[hit.Exposed])
+	}
+	return out
+}
+
+func printTools(stdout io.Writer, tools toolSet, server, search string) error {
+	// A server filter is a question about one server, and the gateway's
+	// own tools are not on any server — so they are not an answer to it.
 	if server != "" {
-		kept := tools[:0]
-		for _, tool := range tools {
+		tools.system = nil
+		kept := tools.upstream[:0]
+		for _, tool := range tools.upstream {
 			if tool.Server == server {
 				kept = append(kept, tool)
 			}
 		}
-		tools = kept
+		tools.upstream = kept
 	}
 
-	if len(tools) == 0 {
-		switch {
-		case search != "" && server != "":
-			fmt.Fprintf(stdout, "no tools on %s match %q\n", server, search)
-		case search != "":
-			fmt.Fprintf(stdout, "no tools match %q\n", search)
-		case server != "":
-			fmt.Fprintf(stdout, "%s is offering no tools\n", server)
-		default:
-			fmt.Fprintln(stdout, "no tools are being offered")
-		}
+	if tools.empty() {
+		fmt.Fprintln(stdout, nothingToShow(server, search))
 		return nil
 	}
 
-	rows := newTable(stdout, "NAME", "SERVER", "DESCRIPTION")
-	for _, tool := range tools {
-		rows.row(tool.Exposed, tool.Server, summarise(tool.Description))
+	if len(tools.system) > 0 {
+		fmt.Fprintf(stdout, "GATEWAY TOOLS (%d)\n", len(tools.system))
+		rows := newTable(stdout, "NAME", "DESCRIPTION")
+		for _, tool := range tools.system {
+			rows.row(tool.Exposed, summarise(tool.Description))
+		}
+		rows.flush()
 	}
-	rows.flush()
 
-	if len(tools) == listLimit {
+	if len(tools.upstream) > 0 {
+		if len(tools.system) > 0 {
+			fmt.Fprintln(stdout)
+		}
+		fmt.Fprintf(stdout, "SERVER TOOLS (%d)\n", len(tools.upstream))
+		rows := newTable(stdout, "NAME", "SERVER", "DESCRIPTION")
+		for _, tool := range tools.upstream {
+			rows.row(tool.Exposed, tool.Server, summarise(tool.Description))
+		}
+		rows.flush()
+	}
+
+	if len(tools.upstream) == listLimit {
 		fmt.Fprintf(stdout, "\nstopped at %d tools; there may be more\n", listLimit)
 	}
 	return nil
+}
+
+func nothingToShow(server, search string) string {
+	switch {
+	case search != "" && server != "":
+		return fmt.Sprintf("no tools on %s match %q", server, search)
+	case search != "":
+		return fmt.Sprintf("no tools match %q", search)
+	case server != "":
+		return fmt.Sprintf("%s is offering no tools", server)
+	default:
+		return "no tools are being offered"
+	}
 }
 
 // descriptionWidth bounds the last column of the tool list.
@@ -188,7 +313,8 @@ func newToolsCallCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 		Long: "Call a tool and print what it returned.\n\n" +
 			"The tool is named the way a client would name it — the exposed name,\n" +
 			"such as \"files_read\". A bare tool name is accepted too when only one\n" +
-			"server offers it.\n\n" +
+			"server offers it. The gateway's own tools, such as \"list_servers\", are\n" +
+			"called by their own names.\n\n" +
 			"Arguments can be given as one JSON object with --args, as repeated\n" +
 			"--arg key=value pairs, or both; a pair overrides the same key in the\n" +
 			"JSON. A pair's value is converted using the type the tool's schema\n" +
@@ -233,9 +359,11 @@ func newToolsCallCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 // wins. A bare tool name is accepted as a convenience when exactly one
 // server offers it; when several do, refusing and naming them is the only
 // safe answer, because picking one would silently call the wrong server.
-func resolveTool(tools []aggregatedTool, name string) (aggregatedTool, error) {
+func resolveTool(tools toolSet, name string) (aggregatedTool, error) {
+	candidates := tools.all()
+
 	var bare []aggregatedTool
-	for _, tool := range tools {
+	for _, tool := range candidates {
 		if tool.Exposed == name {
 			return tool, nil
 		}
@@ -249,7 +377,7 @@ func resolveTool(tools []aggregatedTool, name string) (aggregatedTool, error) {
 		return bare[0], nil
 	case 0:
 		return aggregatedTool{}, fmt.Errorf("no tool named %q is being offered%s",
-			name, suggest(tools, name))
+			name, suggest(candidates, name))
 	default:
 		names := make([]string, len(bare))
 		for i, tool := range bare {
@@ -374,12 +502,9 @@ func coerce(raw, declared string) (any, error) {
 func callTool(ctx context.Context, gateway *gatewayClient, stdout io.Writer,
 	tool aggregatedTool, arguments map[string]any, asJSON bool) error {
 
-	path := fmt.Sprintf("/servers/%s/tools/%s/call",
-		url.PathEscape(tool.Server), url.PathEscape(tool.Tool))
-
 	var result toolCallResponse
 	body := map[string]any{"arguments": arguments}
-	if err := gateway.post(ctx, path, body, &result); err != nil {
+	if err := gateway.post(ctx, callPath(tool), body, &result); err != nil {
 		return err
 	}
 
@@ -400,6 +525,18 @@ func callTool(ctx context.Context, gateway *gatewayClient, stdout io.Writer,
 		return errors.New("the tool reported an error")
 	}
 	return nil
+}
+
+// callPath is where a tool is called.
+//
+// The gateway's own tools have a route of their own because they belong
+// to no server: there is no name to put in the per-server path.
+func callPath(tool aggregatedTool) string {
+	if tool.system {
+		return fmt.Sprintf("/gateway/tools/%s/call", url.PathEscape(tool.Tool))
+	}
+	return fmt.Sprintf("/servers/%s/tools/%s/call",
+		url.PathEscape(tool.Server), url.PathEscape(tool.Tool))
 }
 
 func renderResult(stdout io.Writer, result toolCallResponse) {

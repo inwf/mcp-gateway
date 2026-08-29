@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"mcphub/internal/config"
+	"mcphub/internal/gateway"
 	"mcphub/internal/testmcp"
 )
 
@@ -240,6 +241,119 @@ func TestToolsCallRejectsMalformedArguments(t *testing.T) {
 // Everything on a command line is a string, but a tool that wants a
 // number and is handed "5" rejects it. These cover the conversion that
 // the declared schema type drives.
+// ===== the gateway's own tools =====
+
+// The gateway's own tools are offered to every client, so a list that
+// omits them is not a list of what is on offer. They were missing from
+// this command for the whole of the refactor, which is what this covers.
+func TestToolsListShowsTheGatewaysOwnTools(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "list", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	for _, name := range gateway.SystemToolNames {
+		if !strings.Contains(stdout, name) {
+			t.Errorf("the gateway tool %q is missing from the list:\n%s", name, stdout)
+		}
+	}
+}
+
+// They are shown apart from the forwarded ones: they belong to no server,
+// and a reader looking for "what can I call to find my way around" should
+// not have to pick them out of a list of everything.
+func TestTheGatewaysOwnToolsAreListedApart(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	_, stdout, _ := execute(t, "tools", "list", "--address", address)
+
+	gatewayGroup := strings.Index(stdout, "GATEWAY TOOLS")
+	serverGroup := strings.Index(stdout, "SERVER TOOLS")
+	switch {
+	case gatewayGroup < 0:
+		t.Fatalf("there is no group for the gateway's own tools:\n%s", stdout)
+	case serverGroup < 0:
+		t.Fatalf("there is no group for the forwarded tools:\n%s", stdout)
+	case gatewayGroup > serverGroup:
+		t.Errorf("the gateway's own tools come second; they are how a reader finds the rest:\n%s", stdout)
+	}
+
+	// The forwarded tool has to be under the group that names its server,
+	// not under the gateway's.
+	if row := rowFor(t, stdout, "probe_echo"); !strings.Contains(row, "probe") {
+		t.Errorf("the forwarded tool lost its server: %q", row)
+	}
+}
+
+// A server filter asks about one server. The gateway's own tools are on
+// no server, so including them would be answering a different question.
+func TestAServerFilterLeavesOutTheGatewaysOwnTools(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	_, stdout, _ := execute(t, "tools", "list", "--server", "probe", "--address", address)
+
+	if strings.Contains(stdout, gateway.ToolListServers) {
+		t.Errorf("a gateway tool was listed as belonging to a server:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "probe_echo") {
+		t.Errorf("the server's own tool is missing:\n%s", stdout)
+	}
+}
+
+// A search has to reach both groups, or it silently answers only half the
+// question.
+func TestASearchReachesTheGatewaysOwnTools(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "list", "--search", "servers", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, gateway.ToolListServers) {
+		t.Errorf("searching for \"servers\" did not find %s:\n%s", gateway.ToolListServers, stdout)
+	}
+}
+
+// Calling one used to report that it was not being offered, which was
+// false: it was being served to every connected client at the time.
+func TestAGatewayToolCanBeCalled(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "call", gateway.ToolListServers, "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "probe") {
+		t.Errorf("%s did not report the configured server:\n%s", gateway.ToolListServers, stdout)
+	}
+}
+
+// Arguments have to reach it, converted using its schema like any other
+// tool's.
+func TestAGatewayToolReceivesItsArguments(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "call", gateway.ToolListTools,
+		"--arg", "server=probe", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "echo") {
+		t.Errorf("%s did not report the server's tools:\n%s", gateway.ToolListTools, stdout)
+	}
+}
+
 func TestArgumentsAreConvertedUsingTheSchema(t *testing.T) {
 	schema := map[string]any{
 		"properties": map[string]any{

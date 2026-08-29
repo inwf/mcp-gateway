@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -231,6 +232,53 @@ func (a *API) handleGatewayTools(c *gin.Context) {
 		"tools":       tools,
 		"total":       len(tools),
 		"systemTools": gateway.SystemToolNames,
+	})
+}
+
+// handleCallGatewayTool calls one of the gateway's own tools.
+//
+// These need a route of their own because they belong to no upstream
+// server: /servers/:name/tools/:tool/call has no name to put in it. The
+// call goes through the gateway's MCP server, so it is validated and
+// answered exactly as it would be for a connected client.
+func (a *API) handleCallGatewayTool(c *gin.Context) {
+	tool := c.Param("tool")
+
+	if a.opts.Gateway == nil {
+		fail(c, Unavailable("the gateway is not running"))
+		return
+	}
+	if !gateway.IsSystemTool(tool) {
+		fail(c, NotFound(fmt.Sprintf(
+			"%q is not one of the gateway's own tools; a tool from a server is called "+
+				"through /servers/{server}/tools/{tool}/call", tool)))
+		return
+	}
+
+	var body struct {
+		Arguments map[string]any `json:"arguments"`
+	}
+	if err := bindJSON(c, &body); err != nil {
+		fail(c, err)
+		return
+	}
+
+	result, err := a.opts.Gateway.CallSystemTool(c.Request.Context(), tool, body.Arguments)
+	if err != nil {
+		fail(c, &Error{
+			Code:    CodeUnavailable,
+			Message: fmt.Sprintf("calling %q failed: %s", tool, err),
+			cause:   err,
+		})
+		return
+	}
+
+	// A tool that ran and reported a problem is a successful call with a
+	// failed result, and the caller needs to see what it said.
+	c.JSON(http.StatusOK, gin.H{
+		"isError":           result.IsError,
+		"content":           result.Content,
+		"structuredContent": result.StructuredContent,
 	})
 }
 
