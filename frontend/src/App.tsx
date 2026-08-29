@@ -35,8 +35,17 @@ export function App() {
     >
       {/* AntApp is what makes message and modal calls pick up the theme
           above; the static antd.message.* functions render outside this
-          tree and would come out in the default light palette. */}
-      <AntApp>
+          tree and would come out in the default light palette.
+
+          The height is not decoration. AntApp renders a div, and that div
+          sits between #root and the shell — so without a height of its own
+          it breaks the chain from html down, the shell's height: 100%
+          resolves against nothing and collapses to its content, and the
+          window is left part empty. Worse, the shell then never overflows,
+          so the pane inside it that is supposed to scroll never does:
+          anything past the bottom of the window is clipped by the body and
+          cannot be reached at all. */}
+      <AntApp style={{ height: '100%' }}>
         <QueryClientProvider client={queryClient}>
           <StreamKeeper>
             <div className="field" aria-hidden="true" />

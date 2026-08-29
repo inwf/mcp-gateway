@@ -4,6 +4,11 @@
   display: grid;
   grid-template-columns: var(--rail-width) 1fr;
   height: 100%;
+  /* Grid items are allowed to shrink below their content. Without this a
+     tall page pushes the shell past the window instead of letting the
+     pane inside it scroll — and the body clips what is pushed out, so it
+     becomes unreachable rather than merely off screen. */
+  min-height: 0;
 }
 
 /* ===== the rail =====
@@ -96,6 +101,7 @@
   display: grid;
   grid-template-rows: var(--topbar-height) 1fr;
   min-width: 0; /* lets wide children scroll rather than stretch the grid */
+  min-height: 0; /* and the same for tall ones */
   height: 100%;
 }
 
@@ -129,8 +135,11 @@
   margin-left: auto;
 }
 
+/* The one scrolling pane. Everything above it is fixed to the window, so
+   this is where a page taller than the window has to scroll. */
 .content {
   min-width: 0;
+  min-height: 0;
   padding: var(--space-5);
   overflow: auto;
 }
