@@ -4,7 +4,7 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { QueryClientProvider } from '@tanstack/react-query';
 import '@/i18n';
-import { antdTheme } from '@/theme/antd';
+import { antdThemeFor } from '@/theme/antd';
 import { createQueryClient } from '@/api/query';
 
 /**
@@ -17,7 +17,7 @@ import { createQueryClient } from '@/api/query';
  */
 export function renderWithProviders(ui: ReactNode) {
   return render(
-    <ConfigProvider theme={antdTheme} locale={zhCN} button={{ autoInsertSpace: false }}>
+    <ConfigProvider theme={antdThemeFor('dark')} locale={zhCN} button={{ autoInsertSpace: false }}>
       <AntApp>
         <QueryClientProvider client={createQueryClient()}>{ui}</QueryClientProvider>
       </AntApp>

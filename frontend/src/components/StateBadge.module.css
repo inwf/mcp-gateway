@@ -19,7 +19,7 @@
 }
 
 .connected {
-  border-color: rgb(74 222 128 / 28%);
+  border-color: var(--ok-line);
   background: var(--ok-dim);
   color: var(--ok);
 }
@@ -30,7 +30,7 @@
 }
 
 .connecting {
-  border-color: rgb(251 191 36 / 28%);
+  border-color: var(--warn-line);
   background: var(--warn-dim);
   color: var(--warn);
 }
@@ -41,7 +41,7 @@
 }
 
 .failed {
-  border-color: rgb(251 113 133 / 28%);
+  border-color: var(--danger-line);
   background: var(--danger-dim);
   color: var(--danger);
 }
@@ -53,7 +53,7 @@
 
 .disconnected {
   border-color: var(--line-strong);
-  background: rgb(255 255 255 / 3%);
+  background: var(--lift);
   color: var(--ink-faint);
 }
 

@@ -26,7 +26,7 @@
   padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(160deg, rgb(17 24 35 / 66%), rgb(11 15 22 / 52%));
+  background: linear-gradient(160deg, var(--panel-a), var(--panel-b));
   text-align: left;
   cursor: pointer;
   transition:

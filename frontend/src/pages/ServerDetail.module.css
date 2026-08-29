@@ -81,7 +81,7 @@
 }
 
 .capOn {
-  border-color: rgb(74 222 128 / 30%);
+  border-color: var(--ok-line);
   background: var(--ok-dim);
   color: var(--ok);
 }
@@ -89,9 +89,9 @@
 .failure {
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid rgb(251 113 133 / 25%);
+  border: 1px solid var(--danger-line);
   border-radius: var(--radius);
-  background: rgb(251 113 133 / 6%);
+  background: var(--danger-dim);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--danger);
@@ -136,7 +136,7 @@
 }
 
 .toolRow:hover {
-  background: rgb(255 255 255 / 3%);
+  background: var(--lift);
   color: var(--ink);
 }
 

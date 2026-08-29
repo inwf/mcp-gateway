@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <!-- Both, so the browser knows either is supported. Which one is
+         in force is set on the root element before the first paint;
+         see src/main.tsx. -->
+    <meta name="color-scheme" content="dark light" />
     <title>MCPHUB</title>
   </head>
   <body>

@@ -82,7 +82,7 @@
   padding: 1px 6px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  background: rgb(255 255 255 / 3%);
+  background: var(--lift);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--ink-muted);

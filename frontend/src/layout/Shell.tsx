@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import type { ComponentType } from 'react';
 import { useEventStore } from '@/stores/events';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { cx } from '@/lib/cx';
 import styles from './Shell.module.css';
 
@@ -110,6 +111,7 @@ export function Shell() {
           <h1 className={styles.title}>{title}</h1>
           <span className={styles.crumb}>{t('app.tagline')}</span>
           <div className={styles.topbarRight}>
+            <ThemeSwitch />
             <ConnectionIndicator />
           </div>
         </header>

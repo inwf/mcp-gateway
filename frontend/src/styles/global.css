@@ -51,9 +51,9 @@ body {
   position: absolute;
   inset: -30%;
   background:
-    radial-gradient(46% 38% at 22% 18%, rgb(45 212 191 / 13%) 0%, transparent 62%),
-    radial-gradient(40% 44% at 82% 26%, rgb(167 139 250 / 11%) 0%, transparent 64%),
-    radial-gradient(52% 40% at 58% 92%, rgb(20 184 166 / 9%) 0%, transparent 68%);
+    radial-gradient(46% 38% at 22% 18%, var(--field-wash-1) 0%, transparent 62%),
+    radial-gradient(40% 44% at 82% 26%, var(--field-wash-2) 0%, transparent 64%),
+    radial-gradient(52% 40% at 58% 92%, var(--field-wash-3) 0%, transparent 68%);
   filter: blur(38px);
   animation: drift 44s var(--ease) infinite alternate;
 }
@@ -65,8 +65,8 @@ body {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgb(255 255 255 / 2.5%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(255 255 255 / 2.5%) 1px, transparent 1px);
+    linear-gradient(var(--field-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--field-grid) 1px, transparent 1px);
   background-size: 46px 46px;
   mask-image: radial-gradient(120% 90% at 50% 0%, #000 25%, transparent 78%);
 }
@@ -113,7 +113,7 @@ body {
    down the side of every panel. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(255 255 255 / 12%) transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -126,14 +126,14 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 11%);
+  background: var(--scroll-thumb);
   border: 2px solid transparent;
   background-clip: content-box;
   border-radius: 99px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 20%);
+  background: var(--scroll-thumb-hover);
   background-clip: content-box;
 }
 

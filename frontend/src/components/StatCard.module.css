@@ -4,7 +4,7 @@
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: linear-gradient(160deg, rgb(17 24 35 / 78%), rgb(11 15 22 / 62%));
+  background: linear-gradient(160deg, var(--card-a), var(--card-b));
   transition:
     border-color var(--fast) var(--ease),
     transform var(--fast) var(--ease);
@@ -21,7 +21,7 @@
   z-index: 0;
   background: radial-gradient(
     260px circle at var(--spot-x, 50%) var(--spot-y, 0%),
-    rgb(45 212 191 / 11%),
+    var(--accent-dim),
     transparent 62%
   );
   opacity: 0;

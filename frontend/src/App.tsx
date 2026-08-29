@@ -3,10 +3,11 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createBrowserRouter } from 'react-router-dom';
-import { antdTheme } from '@/theme/antd';
+import { antdThemeFor } from '@/theme/antd';
 import { createQueryClient } from '@/api/query';
 import { routes } from '@/routes';
 import { useEventStream } from '@/hooks/use-event-stream';
+import { useTheme } from '@/hooks/use-theme';
 
 /** Holds the event stream open for the life of the app. It has to sit
  *  inside the query provider, since what it does with an event is
@@ -21,10 +22,11 @@ export function App() {
   // cached response on each state change.
   const queryClient = useMemo(() => createQueryClient(), []);
   const router = useMemo(() => createBrowserRouter(routes), []);
+  const mode = useTheme();
 
   return (
     <ConfigProvider
-      theme={antdTheme}
+      theme={antdThemeFor(mode)}
       locale={zhCN}
       // antd puts a space between the two characters of a Chinese
       // button label by convention. On a dense console it reads as a

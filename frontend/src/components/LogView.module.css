@@ -39,7 +39,7 @@
 }
 
 .line:hover {
-  background: rgb(255 255 255 / 2.5%);
+  background: var(--lift);
 }
 
 .at {
@@ -95,7 +95,7 @@
 
 .error {
   border-left-color: var(--danger);
-  background: rgb(251 113 133 / 4%);
+  background: var(--danger-faint);
 }
 
 .error .level {

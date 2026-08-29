@@ -111,7 +111,7 @@
 }
 
 .serverRow:hover {
-  background: rgb(45 212 191 / 4.5%);
+  background: var(--accent-faint);
 }
 
 .serverName {

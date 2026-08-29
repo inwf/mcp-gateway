@@ -40,5 +40,8 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Reads the repository's own files, so it belongs to the node-side
+  // project rather than to the browser bundle. See tsconfig.node.json.
+  "exclude": ["src/styles/tokens.test.ts"]
 }

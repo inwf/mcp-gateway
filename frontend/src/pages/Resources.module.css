@@ -45,7 +45,7 @@
 }
 
 .row:hover {
-  background: rgb(255 255 255 / 3%);
+  background: var(--lift);
 }
 
 .rowOn {

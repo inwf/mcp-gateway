@@ -20,7 +20,7 @@
   gap: var(--space-2);
   padding: var(--space-3) 0;
   border-right: 1px solid var(--line);
-  background: linear-gradient(180deg, rgb(11 15 22 / 72%), rgb(6 8 13 / 88%));
+  background: linear-gradient(180deg, var(--chrome-a), var(--chrome-b));
   backdrop-filter: blur(14px);
 }
 
@@ -31,7 +31,7 @@
   height: 34px;
   margin-bottom: var(--space-3);
   border-radius: var(--radius);
-  background: linear-gradient(145deg, var(--accent), #6366f1);
+  background: linear-gradient(145deg, var(--accent), var(--mark-b));
   color: var(--ink-inverse);
   font-family: var(--font-mono);
   font-size: 15px;
@@ -64,7 +64,7 @@
 
 .item:hover {
   color: var(--ink-muted);
-  background: rgb(255 255 255 / 4%);
+  background: var(--lift-strong);
 }
 
 .active {
@@ -105,7 +105,7 @@
   gap: var(--space-4);
   padding: 0 var(--space-5);
   border-bottom: 1px solid var(--line);
-  background: rgb(6 8 13 / 55%);
+  background: var(--chrome-flat);
   backdrop-filter: blur(14px);
 }
 
