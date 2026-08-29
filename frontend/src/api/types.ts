@@ -236,6 +236,22 @@ export interface SessionInfo {
   protocolVersion?: string;
 }
 
+/** One entry of an imported document: the server's name, and why it was
+ *  not imported when it was not. */
+export interface ImportResult {
+  name: string;
+  error?: string;
+}
+
+/** What a partially successful import answers with. A document from which
+ *  nothing could be imported is a failed request instead, and its per-entry
+ *  reasons arrive as the envelope's field errors. */
+export interface ImportSummary {
+  results: ImportResult[];
+  imported: number;
+  failed: number;
+}
+
 export interface GatewayTools {
   tools: Tool[];
   total: number;

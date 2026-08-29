@@ -8,6 +8,7 @@ import type {
   GatewayStatus,
   GatewayTools,
   Health,
+  ImportSummary,
   LogQuery,
   LogsResponse,
   MCPServer,
@@ -101,6 +102,13 @@ export const endpoints = {
     api.get<ResourceReadResult>(`${BASE}/servers/${encodeURIComponent(server)}/resource`, {
       query: { uri },
     }),
+
+  // The document is sent exactly as pasted. Which fields need
+  // translating — "type" against "transport", a stdio server recognised
+  // by having a command — is the gateway's business, so that the same
+  // file works through curl as through the web interface.
+  importServers: (document: string) =>
+    api.post<ImportSummary>(`${BASE}/servers/import`, JSON.parse(document) as unknown),
 
   // ===== aggregated =====
 

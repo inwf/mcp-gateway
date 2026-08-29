@@ -8,6 +8,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   PlayCircleOutlined,
+  ImportOutlined,
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
@@ -22,6 +23,7 @@ import { StateBadge } from '@/components/StateBadge';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
 import { ServerForm } from '@/components/ServerForm';
+import { ImportServers } from '@/components/ImportServers';
 import { ellipsize, endpointOf, tagPairs } from '@/lib/format';
 import { cx } from '@/lib/cx';
 import styles from './Servers.module.css';
@@ -47,6 +49,7 @@ export default function Servers() {
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [editing, setEditing] = useState<ServerView | null>(null);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const servers = useQuery({ queryKey: keys.servers.list(), queryFn: endpoints.listServers });
 
@@ -219,6 +222,14 @@ export default function Servers() {
     </Button>
   );
 
+  // Pasting an existing configuration is how most installations start, so
+  // it sits beside the add button rather than behind a menu.
+  const importButton = (
+    <Button icon={<ImportOutlined aria-hidden />} onClick={() => setImporting(true)}>
+      {t('servers.import')}
+    </Button>
+  );
+
   return (
     <div className={styles.page}>
       <div className={styles.bar}>
@@ -235,6 +246,7 @@ export default function Servers() {
           </Button>
         ) : null}
         <span className={styles.spacer} />
+        {importButton}
         {addButton}
       </div>
 
@@ -249,7 +261,12 @@ export default function Servers() {
           <Nothing
             title={t('servers.empty')}
             hint={t('servers.emptyHint')}
-            action={addButton}
+            action={
+              <span className={styles.emptyActions}>
+                {importButton}
+                {addButton}
+              </span>
+            }
           />
         ) : shown.length === 0 ? (
           <Nothing title={t('tools.noMatch')} />
@@ -264,6 +281,7 @@ export default function Servers() {
         )}
       </Panel>
 
+      <ImportServers open={importing} onClose={() => setImporting(false)} />
       <ServerForm open={adding} onClose={() => setAdding(false)} />
       <ServerForm
         open={editing !== null}

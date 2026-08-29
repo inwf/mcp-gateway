@@ -232,6 +232,7 @@ func (a *API) registerRoutes(api gin.IRoutes) {
 	// Servers, and what each one offers.
 	api.GET("/servers", a.handleListServers)
 	api.POST("/servers", a.handleCreateServer)
+	api.POST("/servers/import", a.handleImportServers)
 	api.GET("/servers/:name", a.handleGetServer)
 	api.PUT("/servers/:name", a.handleUpdateServer)
 	api.DELETE("/servers/:name", a.handleDeleteServer)

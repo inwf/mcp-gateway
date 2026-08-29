@@ -87,6 +87,15 @@ export const zh = {
     search: '搜索服务器',
     enabled: '已启用',
     disabled: '已停用',
+    import: '批量导入',
+  },
+
+  import: {
+    title: '从其它客户端导入服务器',
+    hint: '粘贴 Claude Desktop、Cursor、VS Code 等客户端的配置。整份文件直接贴进来即可——mcpServers 以外的键会被忽略，"type" 与 "command" 等写法会被自动识别。',
+    run: '导入',
+    imported: '已导入 {{count}} 台',
+    failed: '{{count}} 台没能导入',
   },
 
   server: {

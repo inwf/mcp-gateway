@@ -181,6 +181,24 @@ func (c Config) validateMCPServers(v *validator) {
 	}
 }
 
+// ValidateServer reports every problem with one server entry, name
+// included. It returns nil or a *[ValidationError].
+//
+// This is what a caller adding servers one at a time needs: validating a
+// whole configuration to check one entry would report that entry's
+// problems alongside every other server's, which is the wrong answer when
+// the question is whether this one can be added.
+func ValidateServer(name string, server MCPServer) error {
+	v := &validator{}
+	validateServerName(v, name)
+	validateServer(v, "mcpServers."+name, server)
+
+	if len(v.errs) == 0 {
+		return nil
+	}
+	return &ValidationError{Errors: v.errs}
+}
+
 func validateServerName(v *validator, name string) {
 	field := "mcpServers." + name
 
