@@ -58,7 +58,7 @@ mcphub servers list
   已在运行的服务）。
 - **七个系统工具**，让模型按需检索工具而不是全量加载。
 - **Web 界面**：服务器状态、工具与资源浏览、实时日志、配置编辑。
-- **CLI**：`servers` / `tools` / `config validate` / `guide`。
+- **CLI**：`servers` / `tools` / `tags` / `ui` / `config validate` / `guide`。
 - **单个二进制**。前端在构建时嵌入，部署时不需要另外准备静态文件。
 - **所有产生的文件都在数据目录内**（默认 `./data`），不往主目录里散落东西。
 

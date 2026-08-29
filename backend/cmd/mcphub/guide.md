@@ -99,7 +99,7 @@ mcphub servers add remote --url https://example.com/mcp \
 | `--disabled`    | 只写进配置，先不连                        |
 | `--from-file f` | 从一份 YAML 片段读取完整定义              |
 
-命令会等它连上再返回，所以启动���败当场就能看到，不用事后去翻。
+命令会等它连上再返回，所以启动失败当场就能看到，不用事后去翻。
 
 改完之后：
 
@@ -125,6 +125,13 @@ mcphub servers list
 典型用法是三步：`search_tools` 找到候选 → `get_tool` 取 schema →
 `call_tool` 调用。工具本身也是直接暴露的，所以知道名字时直接调
 `files_read` 就行，不必绕 `call_tool`。
+
+这七个工具在 CLI 和 Web 界面里都单独成组，也可以直接调用：
+
+```
+mcphub tools show list_tools        看它要什么参数
+mcphub tools call list_servers      直接调它
+```
 
 ## 会话模式
 
@@ -170,12 +177,16 @@ mcphub servers list [--verbose]     列出服务器与各自状态
 mcphub servers add <name> ...       添加服务器
 
 mcphub tools list [--search 词]     列出/搜索网关提供的工具
+mcphub tools show <工具>            看一个工具的完整说明与输入 schema
 mcphub tools call <工具> --arg k=v  调用一个工具
 
+mcphub tags list [--server 名]      列出标签，以及各自被哪些服务器带着
+
+mcphub ui [--print]                 用浏览器打开 Web 界面
 mcphub guide                        输出本文档
 mcphub version                      输出版本
 ```
 
-以 `servers`、`tools` 开头的命令是**运行中实例的客户端**——它们通过管理 API
-询问那个实例，因为只有它知道自己实际连上了哪些上游。默认从配置里的
-`listen` 取地址，也可以用 `--address host:port` 指定。
+以 `servers`、`tools`、`tags` 开头的命令，以及 `mcphub ui`，都是**运行中实例
+的客户端**——它们通过管理 API 询问那个实例，因为只有它知道自己实际连上了哪些
+上游。默认从配置里的 `listen` 取地址，也可以用 `--address host:port` 指定。

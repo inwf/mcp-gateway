@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"slices"
 	"strconv"
@@ -95,6 +96,7 @@ func newToolsCommand(global *globalOptions, stdout io.Writer) *cobra.Command {
 
 	cmd.AddCommand(
 		newToolsListCommand(client, stdout),
+		newToolsShowCommand(client, stdout),
 		newToolsCallCommand(client, stdout),
 	)
 	return cmd
@@ -296,6 +298,124 @@ func summarise(s string) string {
 		return line + " …"
 	}
 	return line
+}
+
+// ===== tools show =====
+
+func newToolsShowCommand(client *clientOptions, stdout io.Writer) *cobra.Command {
+	var asJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "show <tool>",
+		Short: "Show one tool in full, with the arguments it takes",
+		Long: "Show everything about one tool: where it came from, what it does, and\n" +
+			"the arguments it declares.\n\n" +
+			"`tools list` shortens each description to one line so that the list\n" +
+			"stays a list. This is where the full text lives, and the only place\n" +
+			"the input schema is shown — which is what you need to build a call.",
+		Args: exactlyOneArg("tool"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gateway, err := client.connect()
+			if err != nil {
+				return err
+			}
+			tools, err := fetchTools(cmd.Context(), gateway, "")
+			if err != nil {
+				return err
+			}
+			tool, err := resolveTool(tools, args[0])
+			if err != nil {
+				return err
+			}
+			return showTool(stdout, tool, asJSON)
+		},
+	}
+
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the tool as JSON instead of rendering it")
+	return cmd
+}
+
+func showTool(stdout io.Writer, tool aggregatedTool, asJSON bool) error {
+	if asJSON {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(map[string]any{
+			"exposed":     tool.Exposed,
+			"tool":        tool.Tool,
+			"server":      tool.Server,
+			"system":      tool.system,
+			"description": tool.Description,
+			"inputSchema": tool.InputSchema,
+		})
+	}
+
+	facts := newTable(stdout)
+	facts.row("name", tool.Exposed)
+	if tool.system {
+		// A gateway tool is not forwarded from anywhere, and saying "-"
+		// under a SERVER heading would leave a reader wondering which one.
+		facts.row("origin", "the gateway itself")
+	} else {
+		facts.row("server", tool.Server)
+		if tool.Tool != tool.Exposed {
+			// The gateway prefixes, and renames on a collision. The name on
+			// the server is what its own documentation talks about.
+			facts.row("name on the server", tool.Tool)
+		}
+	}
+	facts.flush()
+
+	if tool.Description != "" {
+		fmt.Fprintf(stdout, "\n%s\n", tool.Description)
+	}
+
+	printArguments(stdout, tool.InputSchema)
+	return nil
+}
+
+// printArguments renders the input schema as a list of arguments, and
+// then in full.
+//
+// The list is what someone building a call actually reads: names, types,
+// and which are required. The schema follows because it is the only
+// complete answer — an upstream is free to use constructs no summary
+// covers, and a summary that quietly dropped one would be worse than no
+// summary at all.
+func printArguments(stdout io.Writer, schema map[string]any) {
+	if len(schema) == 0 {
+		fmt.Fprintln(stdout, "\nthis tool takes no arguments")
+		return
+	}
+
+	properties, _ := schema["properties"].(map[string]any)
+	if len(properties) == 0 {
+		fmt.Fprintln(stdout, "\nthis tool declares no arguments")
+	} else {
+		required := map[string]bool{}
+		if list, ok := schema["required"].([]any); ok {
+			for _, name := range list {
+				if text, ok := name.(string); ok {
+					required[text] = true
+				}
+			}
+		}
+
+		fmt.Fprintln(stdout, "\nARGUMENTS")
+		rows := newTable(stdout, "NAME", "TYPE", "REQUIRED", "DESCRIPTION")
+		for _, name := range slices.Sorted(maps.Keys(properties)) {
+			property, _ := properties[name].(map[string]any)
+			kind, _ := property["type"].(string)
+			description, _ := property["description"].(string)
+			rows.row(name, dash(kind), yesNo(required[name]), summarise(description))
+		}
+		rows.flush()
+	}
+
+	encoded, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(stdout, "\nINPUT SCHEMA\n%s\n", encoded)
 }
 
 // ===== tools call =====
