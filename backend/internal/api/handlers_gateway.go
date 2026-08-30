@@ -50,7 +50,11 @@ func (a *API) handleAggregatedTools(c *gin.Context) {
 
 	cfg := a.opts.Configs.Get()
 	byServer := a.opts.Upstreams.Tools()
-	names := gateway.BuildNames(byServer)
+	// Names have to be worked out over the exposed tools alone, because
+	// that is the set the gateway registers. Computing them over every
+	// upstream tool would report names that were never registered, and
+	// would see collisions the registered set does not have.
+	names := gateway.PublishedNames(byServer, cfg)
 
 	// Tag filters are applied to the servers first, because a tag
 	// belongs to a server rather than to a tool.

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -81,19 +82,29 @@ func ServeIfRequested() (served bool, code int) {
 	return true, serve(mode)
 }
 
+// ToolNames are the tools this server offers, including the one "grow"
+// adds at runtime.
+//
+// They are named here because a gateway exposes nothing it has not been
+// told to expose, so a test that wants these tools forwarded has to list
+// them in the configuration. Deriving the list at run time would mean
+// asking the server, which is the thing under test.
+var ToolNames = []string{"echo", "sleep", "grow", "grown", "fail"}
+
 // ServerConfig returns a stdio server configuration that runs this test
-// binary in the given mode.
+// binary in the given mode, with every tool exposed.
 func ServerConfig(mode string) (config.MCPServer, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return config.MCPServer{}, fmt.Errorf("locate the test binary: %w", err)
 	}
 	return config.MCPServer{
-		Transport: config.TransportStdio,
-		Command:   self,
-		Env:       map[string]string{ModeEnv: mode},
-		Enabled:   true,
-		Timeout:   20 * time.Second,
+		Transport:    config.TransportStdio,
+		Command:      self,
+		Env:          map[string]string{ModeEnv: mode},
+		Enabled:      true,
+		Timeout:      20 * time.Second,
+		ExposedTools: slices.Clone(ToolNames),
 	}, nil
 }
 

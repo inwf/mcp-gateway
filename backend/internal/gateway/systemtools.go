@@ -189,7 +189,7 @@ func RegisterSystemTools(server *mcp.Server, ups Upstreams, cfgs Configs) {
 			"exactly as returned by list_servers.",
 		Annotations: readOnly("List tools on a server"),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in listToolsInput) (*mcp.CallToolResult, listToolsOutput, error) {
-		out, err := listTools(ups, in.Server)
+		out, err := listTools(ups, cfgs, in.Server)
 		if err != nil {
 			return toolError(err), listToolsOutput{}, nil
 		}
@@ -202,7 +202,7 @@ func RegisterSystemTools(server *mcp.Server, ups Upstreams, cfgs Configs) {
 			"to build a valid call.",
 		Annotations: readOnly("Get a tool's schema"),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in getToolInput) (*mcp.CallToolResult, getToolOutput, error) {
-		out, err := getTool(ups, in.Server, in.Tool)
+		out, err := getTool(ups, cfgs, in.Server, in.Tool)
 		if err != nil {
 			return toolError(err), getToolOutput{}, nil
 		}
@@ -233,7 +233,7 @@ func RegisterSystemTools(server *mcp.Server, ups Upstreams, cfgs Configs) {
 			"description. Every word must match.",
 		Annotations: readOnly("Search tools"),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchToolsInput) (*mcp.CallToolResult, searchToolsOutput, error) {
-		return nil, searchTools(ups, in), nil
+		return nil, searchTools(ups, cfgs, in), nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -288,13 +288,16 @@ func listServers(ups Upstreams, cfgs Configs) listServersOutput {
 	return out
 }
 
-func listTools(ups Upstreams, server string) (listToolsOutput, error) {
+func listTools(ups Upstreams, cfgs Configs, server string) (listToolsOutput, error) {
 	all := ups.Tools()
 	if err := requireServer(ups, server); err != nil {
 		return listToolsOutput{}, err
 	}
 
-	names := BuildNames(all)
+	// Every tool the server offers is listed, exposed or not: this is how
+	// a model discovers what is available, and the whole point of exposing
+	// little is that discovery still reaches everything.
+	names := PublishedNames(all, cfgs.Get())
 	out := listToolsOutput{Server: server, Tools: []ToolSummary{}}
 	for _, tool := range all[server] {
 		if tool == nil || tool.Name == "" {
@@ -313,7 +316,7 @@ func listTools(ups Upstreams, server string) (listToolsOutput, error) {
 	return out, nil
 }
 
-func getTool(ups Upstreams, server, tool string) (getToolOutput, error) {
+func getTool(ups Upstreams, cfgs Configs, server, tool string) (getToolOutput, error) {
 	all := ups.Tools()
 	if err := requireServer(ups, server); err != nil {
 		return getToolOutput{}, err
@@ -323,7 +326,7 @@ func getTool(ups Upstreams, server, tool string) (getToolOutput, error) {
 		if candidate == nil || candidate.Name != tool {
 			continue
 		}
-		exposed, _ := BuildNames(all).Exposed(server, tool)
+		exposed, _ := PublishedNames(all, cfgs.Get()).Exposed(server, tool)
 
 		// The declared type says this is an object, so an upstream that
 		// published something else must not be forwarded verbatim: the
@@ -363,20 +366,21 @@ func callTool(ctx context.Context, ups Upstreams, in callToolInput) (*mcp.CallTo
 	return ups.CallTool(ctx, in.Server, in.Tool, args)
 }
 
-func searchTools(ups Upstreams, in searchToolsInput) searchToolsOutput {
+func searchTools(ups Upstreams, cfgs Configs, in searchToolsInput) searchToolsOutput {
 	all := ups.Tools()
-	names := BuildNames(all)
+	names := PublishedNames(all, cfgs.Get())
 
-	candidates := make([]Searchable, 0, names.Len())
+	candidates := make([]Searchable, 0, len(all))
 	for _, server := range slices.Sorted(maps.Keys(all)) {
 		for _, tool := range all[server] {
 			if tool == nil || tool.Name == "" {
 				continue
 			}
-			exposed, ok := names.Exposed(server, tool.Name)
-			if !ok {
-				continue
-			}
+			// A tool with no exposed name is still a search result. Search
+			// is discovery, and leaving out everything unexposed would make
+			// it useless on an installation that exposes little — which is
+			// the ordinary case.
+			exposed, _ := names.Exposed(server, tool.Name)
 			candidates = append(candidates, Searchable{
 				Server:      server,
 				Tool:        tool.Name,

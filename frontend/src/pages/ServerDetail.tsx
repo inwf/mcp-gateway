@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Button, Popconfirm, Skeleton, Table, Tabs, Tooltip } from 'antd';
+import { App, Button, Popconfirm, Skeleton, Switch, Table, Tabs, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   ArrowLeftOutlined,
@@ -144,6 +144,42 @@ function OverviewTab({ server }: { server: ServerView }) {
   );
 }
 
+/**
+ * Turning one tool's exposure on and off.
+ *
+ * The allow list lives in the server's configuration, so a change is a
+ * configuration write — the same call the edit form makes. Writing the
+ * whole list rather than a delta is what the endpoint takes, and it also
+ * keeps two tabs from each dropping the other's change silently: the
+ * second write is built from what was read, and the list is refetched
+ * afterwards.
+ *
+ * There is no optimistic update. The gateway has to republish its tool
+ * list before the exposed name exists, and inventing that name here would
+ * be the second computation of it that this page just stopped doing.
+ */
+function useExposure(server: ServerView) {
+  const queryClient = useQueryClient();
+  const { message } = App.useApp();
+  const { t } = useTranslation();
+
+  return useMutation({
+    mutationFn: ({ tool, on }: { tool: string; on: boolean }) => {
+      const current = server.config.exposedTools ?? [];
+      const next = on ? [...new Set([...current, tool])] : current.filter((name) => name !== tool);
+      return endpoints.updateServer(server.name, { ...server.config, exposedTools: next });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.servers.all });
+      void queryClient.invalidateQueries({ queryKey: keys.tools.all });
+      void queryClient.invalidateQueries({ queryKey: keys.gateway.all });
+    },
+    onError: (error: unknown) => {
+      message.error(error instanceof Error ? error.message : t('error.unknown'));
+    },
+  });
+}
+
 function ToolsTab({ server }: { server: ServerView }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
@@ -157,6 +193,8 @@ function ToolsTab({ server }: { server: ServerView }) {
     enabled: connected,
   });
 
+  const expose = useExposure(server);
+
   if (!connected) {
     return <Nothing title={t('state.disconnected')} hint={t('tools.emptyHint')} />;
   }
@@ -167,24 +205,41 @@ function ToolsTab({ server }: { server: ServerView }) {
   if (tools.data.length === 0) return <Nothing title={t('tools.empty')} />;
 
   const active = tools.data.find((tool) => tool.name === selected) ?? tools.data[0];
+  const exposedCount = tools.data.filter((tool) => tool.exposed).length;
 
   return (
     <div className={styles.tools}>
       <Panel
         title={t('server.tools')}
-        count={tools.data.length}
+        count={t('tools.exposedRatio', { count: exposedCount, total: tools.data.length })}
         flush
         className={styles.toolList}
       >
         {tools.data.map((tool) => (
-          <button
+          <div
             key={tool.name}
-            type="button"
             className={cx(styles.toolRow, tool.name === active?.name && styles.toolOn)}
-            onClick={() => setSelected(tool.name)}
           >
-            {tool.name}
-          </button>
+            <button
+              type="button"
+              className={styles.toolPick}
+              onClick={() => setSelected(tool.name)}
+            >
+              <span className={styles.toolRowName}>{tool.name}</span>
+              {/* The exposed name is worth showing where it exists, because
+                  it is what a client has to call and it is not always the
+                  upstream name. */}
+              {tool.exposed ? <span className={styles.toolExposed}>{tool.exposed}</span> : null}
+            </button>
+            <Switch
+              size="small"
+              checked={Boolean(tool.exposed)}
+              loading={expose.isPending && expose.variables?.tool === tool.name}
+              disabled={expose.isPending}
+              onChange={(on) => expose.mutate({ tool: tool.name, on })}
+              aria-label={`${t('server.expose')} ${tool.name}`}
+            />
+          </div>
         ))}
       </Panel>
 

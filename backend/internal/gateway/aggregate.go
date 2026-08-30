@@ -6,6 +6,8 @@ import (
 	"slices"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcphub/internal/config"
 )
 
 // Aggregate is what the gateway exposes to its clients: the upstream
@@ -121,11 +123,58 @@ func decodeObjectSchema(schema any) (map[string]any, bool) {
 	return decoded, true
 }
 
-// FilterTools drops the tools a server's configuration does not expose.
-// An empty allow list exposes everything, which is the default.
+// ExposedByServer keeps only the tools each server's configuration
+// exposes, dropping the servers left with none.
+func ExposedByServer(all map[string][]*mcp.Tool, cfg config.Config) map[string][]*mcp.Tool {
+	out := make(map[string][]*mcp.Tool, len(all))
+	for server, tools := range all {
+		if allowed := FilterTools(tools, cfg.MCPServers[server].ExposedTools); len(allowed) > 0 {
+			out[server] = allowed
+		}
+	}
+	return out
+}
+
+// PublishedNames maps every tool the gateway actually offers to the name
+// it offers it under.
+//
+// This is the one place that answers "what does a client call this tool".
+// Having two answers is what went wrong before: the system tools worked
+// out names over every upstream tool while Sync registered only the
+// exposed ones, so list_tools handed out names that were never
+// registered. Worse, an unexposed tool sharing a name with an exposed one
+// counted as a collision on one side and not the other, so even an
+// exposed tool could be reported under the wrong name.
+//
+// A tool absent from the returned map has no name to be called by. It is
+// still reachable through call_tool, which addresses a tool by its server
+// and its own name rather than by a gateway-assigned one.
+func PublishedNames(all map[string][]*mcp.Tool, cfg config.Config) NameMap {
+	return BuildNames(ExposedByServer(all, cfg))
+}
+
+// FilterTools keeps only the tools a server's configuration exposes.
+//
+// Nothing is exposed unless it is listed, and that strict default is the
+// point rather than an oversight. A client's tools/list would otherwise
+// carry the full input schema of every tool on every configured server,
+// and those schemas are not small — one upstream search tool here
+// declares fifteen parameters. Spending a model's context on the
+// arguments of tools it will never call is the cost this avoids.
+//
+// It costs nothing in reach. A tool that is not exposed is still
+// callable: the gateway's own call_tool reads the unfiltered upstream
+// state, as do list_tools, get_tool and search_tools. A model finds what
+// it needs through those and calls it by name. "Not exposed" means "not
+// in the opening hand", not "unavailable" — one extra round trip in
+// exchange for not paying for every tool up front.
+//
+// An empty list and an absent one mean the same thing, and there is
+// deliberately no way to spell "expose everything": a set that grows on
+// its own whenever an upstream adds a tool is exactly what this prevents.
 func FilterTools(tools []*mcp.Tool, allowed []string) []*mcp.Tool {
 	if len(allowed) == 0 {
-		return tools
+		return nil
 	}
 
 	permitted := make(map[string]bool, len(allowed))

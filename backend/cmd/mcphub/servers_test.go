@@ -58,6 +58,54 @@ func TestServersListShowsTheConfiguredServers(t *testing.T) {
 	}
 }
 
+// Nothing is exposed unless the configuration says so, so a bare tool
+// count would read as an offer the gateway is not making. The pair says
+// both numbers.
+func TestServersListShowsHowMuchIsExposed(t *testing.T) {
+	base, stop, done := running(t, func(cfg *config.Config) {
+		full, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		// One tool of the several this server offers.
+		some := full
+		some.ExposedTools = []string{"echo"}
+
+		quiet := full
+		quiet.ExposedTools = nil
+
+		cfg.MCPServers = map[string]config.MCPServer{"some": some, "quiet": quiet}
+	})
+	defer func() { stop(); <-done }()
+
+	address := hostPort(t, base)
+	waitForState(t, address, "some", "connected")
+	waitForState(t, address, "quiet", "connected")
+
+	code, stdout, stderr := execute(t, "servers", "list", "--address", address)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+
+	if !strings.Contains(stdout, "EXPOSED/TOOLS") {
+		t.Errorf("the column does not say it is a pair:\n%s", stdout)
+	}
+
+	some := rowFor(t, stdout, "some")
+	if !strings.Contains(some, "1/") {
+		t.Errorf("the exposed count is missing from %q", some)
+	}
+	// A server that exposes nothing still reports what it has, which is
+	// the difference between "exposes nothing" and "offers nothing".
+	quiet := rowFor(t, stdout, "quiet")
+	if !strings.Contains(quiet, "0/") {
+		t.Errorf("a server exposing nothing does not say so: %q", quiet)
+	}
+	if strings.Contains(quiet, "0/0") {
+		t.Errorf("the upstream tool count was lost: %q", quiet)
+	}
+}
+
 // The columns have to stay aligned, because that is the whole reason the
 // output goes through a tabwriter rather than Printf.
 func TestServersListAlignsItsColumns(t *testing.T) {

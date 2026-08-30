@@ -67,11 +67,16 @@ describe('picking from what the server offers', () => {
 
   // An empty list means every tool, which is not what an empty set of
   // boxes looks like it means.
-  it('says that ticking nothing exposes everything', async () => {
+  // Ticking nothing is the default state, and it means the tools stay out
+  // of the client's list rather than all going into it. Saying so where the
+  // boxes are is the only place someone will read it.
+  it('says that ticking nothing exposes nothing, and that the tools are still callable', async () => {
     serving();
     renderWithProviders(<ExposedToolsEditor server="files" value={[]} />);
 
-    expect(await screen.findByText('未勾选 = 全部暴露')).toBeInTheDocument();
+    const note = await screen.findByText(/一个都没勾/);
+    expect(note).toBeInTheDocument();
+    expect(note.textContent).toContain('call_tool');
   });
 
   it('counts what is ticked once something is', async () => {

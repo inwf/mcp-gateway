@@ -28,8 +28,11 @@ func gatewayOn(t *testing.T, ups gateway.Upstreams, adjust func(*gateway.Options
 	opts := gateway.Options{
 		Version:   "test",
 		Upstreams: ups,
-		Configs:   configFixture(t, map[string]config.MCPServer{}),
-		Gateway:   config.Default().Gateway,
+		// Forwarding is what most of these tests are about, so the default
+		// here exposes everything on offer. A test about exposure itself
+		// overrides this.
+		Configs: exposingEverything(t, ups),
+		Gateway: config.Default().Gateway,
 	}
 	if adjust != nil {
 		adjust(&opts)
@@ -316,7 +319,15 @@ func TestSyncingWithNoChangesDoesNothing(t *testing.T) {
 
 func TestSyncPublishesNewUpstreamTools(t *testing.T) {
 	ups := twoServers()
-	url, g := gatewayOn(t, ups, nil)
+	url, g := gatewayOn(t, ups, func(o *gateway.Options) {
+		// The server arrives later but is configured up front, which is
+		// the ordinary case: someone writes the configuration and the
+		// gateway connects afterwards.
+		o.Configs = exposing(t, map[string][]string{
+			"files": {"read", "write"},
+			"extra": {"thing"},
+		})
+	})
 	session := clientOn(t, url, nil)
 
 	if names := listedToolNames(t, session); slices.Contains(names, "extra_thing") {
@@ -372,6 +383,131 @@ func TestExposedToolsFilterIsApplied(t *testing.T) {
 	}
 	if slices.Contains(names, "files_write") {
 		t.Errorf("a tool outside the allow list was exposed: %v", names)
+	}
+}
+
+// Nothing is exposed unless the configuration says so, which is the
+// point: a client's opening tools/list is the gateway's own tools and
+// nothing else.
+func TestAServerExposesNothingUntilItIsAskedTo(t *testing.T) {
+	ups := twoServers()
+	url, _ := gatewayOn(t, ups, func(o *gateway.Options) {
+		o.Configs = exposing(t, map[string][]string{"files": nil})
+	})
+	session := clientOn(t, url, nil)
+
+	names := listedToolNames(t, session)
+	for _, tool := range []string{"files_read", "files_write"} {
+		if slices.Contains(names, tool) {
+			t.Errorf("%q is exposed although nothing was listed: %v", tool, names)
+		}
+	}
+	if !slices.Contains(names, gateway.ToolListServers) {
+		t.Errorf("the gateway's own tools went with them: %v", names)
+	}
+}
+
+// The whole design rests on this.
+//
+// Exposing nothing by default is only a deferral — "not in the opening
+// hand" — if an unexposed tool can still be reached. Were the gateway's
+// own call_tool to honour the same filter, the strict default would be a
+// lock instead, and a fresh installation would be able to call nothing at
+// all. That the system tools read unfiltered upstream state is currently
+// a property of how they are written; this is what makes it a promise.
+func TestAnUnexposedToolIsStillFoundAndCalled(t *testing.T) {
+	ups := twoServers()
+	url, _ := gatewayOn(t, ups, func(o *gateway.Options) {
+		o.Configs = exposing(t, map[string][]string{"files": nil})
+	})
+	session := clientOn(t, url, nil)
+
+	// Not on offer...
+	if names := listedToolNames(t, session); slices.Contains(names, "files_read") {
+		t.Fatalf("files_read is exposed although nothing was listed: %v", names)
+	}
+
+	// ...but list_tools still finds it,
+	listed := callSystemTool(t, session, gateway.ToolListTools,
+		map[string]any{"server": "files"})
+	if text := resultText(listed); !strings.Contains(text, "read") {
+		t.Errorf("list_tools does not report an unexposed tool: %s", text)
+	}
+
+	// ...get_tool still describes it,
+	described := callSystemTool(t, session, gateway.ToolGetTool,
+		map[string]any{"server": "files", "tool": "read"})
+	if described.IsError {
+		t.Errorf("get_tool refused an unexposed tool: %s", resultText(described))
+	}
+
+	// ...and call_tool still calls it.
+	called := callSystemTool(t, session, gateway.ToolCallTool,
+		map[string]any{"server": "files", "tool": "read"})
+	if called.IsError {
+		t.Fatalf("call_tool refused an unexposed tool: %s", resultText(called))
+	}
+	if !slices.Contains(ups.calls, "files/read") {
+		t.Errorf("the call never reached the upstream; calls = %v", ups.calls)
+	}
+}
+
+// The exposed name a system tool hands out has to be a name the gateway
+// actually registered.
+//
+// Two computations used to answer "what is this tool called": the system
+// tools worked names out over every upstream tool, while Sync registered
+// only the exposed ones. Nothing compared them, so list_tools handed out
+// names that did not exist. The collision case is the sharper one — an
+// unexposed tool sharing a name counted as a clash on one side and not
+// the other, so even an exposed tool came back under the wrong name.
+func TestReportedExposedNamesAreNamesThatWereRegistered(t *testing.T) {
+	// Both servers offer "read". Only one exposes it, so there is no
+	// collision among the published tools and the exposed one must keep
+	// its unsuffixed name.
+	ups := &fakeUpstreams{
+		statuses: []upstream.Status{
+			{Name: "files", State: upstream.StateConnected},
+			{Name: "notes", State: upstream.StateConnected},
+		},
+		tools: map[string][]*mcp.Tool{
+			"files": {{Name: "read"}, {Name: "write"}},
+			"notes": {{Name: "read"}},
+		},
+	}
+	url, _ := gatewayOn(t, ups, func(o *gateway.Options) {
+		o.Configs = exposing(t, map[string][]string{
+			"files": {"read"},
+			"notes": nil,
+		})
+	})
+	session := clientOn(t, url, nil)
+
+	registered := listedToolNames(t, session)
+
+	for _, probe := range []struct{ server, tool string }{
+		{"files", "read"}, {"files", "write"}, {"notes", "read"},
+	} {
+		var out struct {
+			Tools []gateway.ToolSummary `json:"tools"`
+		}
+		structured(t, callSystemTool(t, session, gateway.ToolListTools,
+			map[string]any{"server": probe.server}), &out)
+
+		for _, summary := range out.Tools {
+			if summary.Name != probe.tool || summary.Exposed == "" {
+				continue
+			}
+			if !slices.Contains(registered, summary.Exposed) {
+				t.Errorf("list_tools offers %s/%s as %q, which is not registered; registered = %v",
+					probe.server, probe.tool, summary.Exposed, registered)
+			}
+		}
+	}
+
+	// And the exposed one is reported, not silently dropped.
+	if !slices.Contains(registered, "files_read") {
+		t.Errorf("files_read was not registered at all: %v", registered)
 	}
 }
 
@@ -642,6 +778,10 @@ func TestWatchRepublishesOnUpstreamChanges(t *testing.T) {
 	url, g := gatewayOn(t, ups, func(o *gateway.Options) {
 		// No debounce delay, so the test does not wait on a window.
 		o.Gateway.NotifyDebounce = 0
+		o.Configs = exposing(t, map[string][]string{
+			"files": {"read", "write"},
+			"late":  {"arrival"},
+		})
 	})
 	session := clientOn(t, url, nil)
 

@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"mcphub/internal/config"
+	"mcphub/internal/gateway"
 	"mcphub/internal/upstream"
 )
 
@@ -19,6 +20,20 @@ type ServerView struct {
 	Name   string          `json:"name"`
 	Config wireServer      `json:"config"`
 	Status upstream.Status `json:"status"`
+
+	// Exposed counts the tools this server actually contributes to the
+	// gateway's tools/list.
+	//
+	// It is computed here rather than left to the caller because it needs
+	// both halves at once: the configured allow list and the tools the
+	// server currently offers. A caller holding only the configuration
+	// would count names for tools that have since disappeared, and one
+	// holding only the status has nothing to filter with.
+	//
+	// Nothing is exposed unless it is listed, so this is normally well
+	// below Status.ToolCount — that is the design, not a fault, and the
+	// number is reported so the difference is visible rather than silent.
+	Exposed int `json:"exposedCount"`
 }
 
 // ===== step 60: server CRUD =====
@@ -50,7 +65,20 @@ func (a *API) viewOf(name string, server config.MCPServer, statuses map[string]u
 		// connection manager still has a truthful state to report.
 		status = upstream.Status{Name: name, State: upstream.StateDisconnected}
 	}
-	return ServerView{Name: name, Config: wireServer{server.Redact()}, Status: status}
+	return ServerView{
+		Name:    name,
+		Config:  wireServer{server.Redact()},
+		Status:  status,
+		Exposed: a.exposedCount(name, server),
+	}
+}
+
+// exposedCount counts the tools a server contributes to the gateway.
+func (a *API) exposedCount(name string, server config.MCPServer) int {
+	if a.opts.Upstreams == nil {
+		return 0
+	}
+	return len(gateway.FilterTools(a.opts.Upstreams.Tools()[name], server.ExposedTools))
 }
 
 func (a *API) handleGetServer(c *gin.Context) {
@@ -110,9 +138,10 @@ func (a *API) handleCreateServer(c *gin.Context) {
 	a.applyConfig(c)
 
 	c.JSON(http.StatusCreated, ServerView{
-		Name:   body.Name,
-		Config: wireServer{body.Server.Redact()},
-		Status: upstream.Status{Name: body.Name, State: upstream.StateDisconnected},
+		Name:    body.Name,
+		Config:  wireServer{body.Server.Redact()},
+		Status:  upstream.Status{Name: body.Name, State: upstream.StateDisconnected},
+		Exposed: a.exposedCount(body.Name, body.Server.MCPServer),
 	})
 }
 
@@ -147,9 +176,10 @@ func (a *API) handleUpdateServer(c *gin.Context) {
 	// the UI, when what is true is that the server is still in whatever
 	// state it was before the edit.
 	c.JSON(http.StatusOK, ServerView{
-		Name:   name,
-		Config: wireServer{updated.Redact()},
-		Status: a.statusOfServer(name),
+		Name:    name,
+		Config:  wireServer{updated.Redact()},
+		Status:  a.statusOfServer(name),
+		Exposed: a.exposedCount(name, updated),
 	})
 }
 
@@ -262,12 +292,48 @@ func (a *API) requireConnection(c *gin.Context) (*upstream.Conn, bool) {
 	return conn, true
 }
 
+// ServerTool is one of a server's tools, with the name the gateway
+// offers it under if it offers it at all.
+//
+// Exposed is empty when the tool is not in the gateway's tools/list. The
+// name is filled in here rather than worked out by the caller because it
+// depends on the whole exposed set: a collision between two servers is
+// resolved by renaming, and only somewhere holding every server's
+// configuration can see one. A second computation of these names is
+// exactly what went wrong before.
+type ServerTool struct {
+	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	InputSchema any    `json:"inputSchema,omitempty"`
+	Exposed     string `json:"exposed,omitempty"`
+}
+
 func (a *API) handleServerTools(c *gin.Context) {
+	name := c.Param("name")
 	conn, ok := a.requireConnection(c)
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"tools": nonNilTools(conn.Tools())})
+
+	var names gateway.NameMap
+	if a.opts.Upstreams != nil {
+		names = gateway.PublishedNames(a.opts.Upstreams.Tools(), a.opts.Configs.Get())
+	}
+
+	tools := nonNilTools(conn.Tools())
+	out := make([]ServerTool, 0, len(tools))
+	for _, tool := range tools {
+		exposed, _ := names.Exposed(name, tool.Name)
+		out = append(out, ServerTool{
+			Name:        tool.Name,
+			Title:       tool.Title,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+			Exposed:     exposed,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"tools": out})
 }
 
 func (a *API) handleServerResources(c *gin.Context) {

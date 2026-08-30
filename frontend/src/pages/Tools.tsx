@@ -91,6 +91,11 @@ function matching(tools: AggregatedTool[], search: string): AggregatedTool[] {
  * tools, or open its exposed-tools list and tick something. "No tools"
  * alone would leave all five looking the same.
  *
+ * The last of those is the ordinary case rather than a fault. The gateway
+ * exposes nothing it has not been asked to, so a freshly added server
+ * contributes none of its tools — and its group says so, along with the
+ * fact that a model can still call them.
+ *
  * A group without a server view only exists because it has tools in it,
  * so there is nothing to explain in that case.
  */
@@ -108,8 +113,6 @@ function emptyHint(view: ServerView | undefined, truncated: boolean, t: Translat
   if (status.state !== 'connected') return t('tools.groupOffline');
   if (!status.hasTools) return t('tools.groupNoCapability');
 
-  // The server has tools and the configuration exposes none of them,
-  // which is a decision someone made rather than a fault.
   if (status.toolCount > 0) return t('tools.groupAllHidden', { count: status.toolCount });
   return t('tools.groupNoTools');
 }
@@ -336,7 +339,17 @@ export default function Tools() {
             <Panel
               key={group.server}
               title={<span className={styles.serverName}>{group.server}</span>}
-              count={group.tools.length}
+              // The pair, not the count: the gateway offers nothing it has
+              // not been asked to, so "3" alone reads as all this server
+              // has. "3 / 9" says how much was asked for.
+              count={
+                group.view
+                  ? t('tools.exposedRatio', {
+                      count: group.view.exposedCount,
+                      total: group.view.status.toolCount,
+                    })
+                  : group.tools.length
+              }
               actions={
                 group.view ? (
                   <StateBadge

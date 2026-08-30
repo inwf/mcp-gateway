@@ -150,6 +150,11 @@ export interface ServerView {
   name: string;
   config: MCPServer;
   status: ServerStatus;
+  /** How many of the server's tools the gateway actually offers in its
+   *  `tools/list`. The gateway computes this: it needs the configured
+   *  list and the tools the server currently has, and only it holds
+   *  both. Normally well below `status.toolCount` — that is the design. */
+  exposedCount: number;
 }
 
 // ===== tools and resources =====
@@ -159,6 +164,11 @@ export interface Tool {
   title?: string;
   description?: string;
   inputSchema?: unknown;
+  /** The name the gateway offers this tool under, absent when it is not
+   *  offered at all. The gateway works it out — collisions between
+   *  servers are resolved by renaming, so only something holding every
+   *  server's configuration can say what a tool is called. */
+  exposed?: string;
 }
 
 export interface Resource {

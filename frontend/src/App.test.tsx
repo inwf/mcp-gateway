@@ -84,7 +84,7 @@ describe('the application', () => {
   it('shows the overview with live figures', async () => {
     visit('/');
 
-    await waitFor(() => expect(screen.getByText('聚合工具')).toBeInTheDocument(), LAZY);
+    await waitFor(() => expect(screen.getByText('已暴露工具')).toBeInTheDocument(), LAZY);
     // The count-up starts at zero and settles on the value, so this
     // waits for the figure rather than asserting the first frame.
     await waitFor(() => expect(screen.getByText('7')).toBeInTheDocument(), LAZY);

@@ -27,6 +27,53 @@ func withTestServer(t *testing.T, name string) (address string, cleanup func()) 
 	return address, func() { stop(); <-done }
 }
 
+// The list is only what is exposed, and on an ordinary installation that
+// is a small part of what exists. Presenting it as the whole would send
+// someone looking for a tool that is there all along.
+func TestToolsListSaysWhatItLeftOut(t *testing.T) {
+	base, stop, done := running(t, func(cfg *config.Config) {
+		upstream, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		upstream.ExposedTools = []string{"echo"}
+		cfg.MCPServers = map[string]config.MCPServer{"probe": upstream}
+	})
+	defer func() { stop(); <-done }()
+
+	address := hostPort(t, base)
+	waitForState(t, address, "probe", "connected")
+
+	code, stdout, stderr := execute(t, "tools", "list", "--address", address)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+
+	if !strings.Contains(stdout, "probe_echo") {
+		t.Errorf("the exposed tool is missing:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "not exposed") {
+		t.Errorf("nothing says the list is partial:\n%s", stdout)
+	}
+	// And it says how to reach them, rather than leaving the reader stuck.
+	if !strings.Contains(stdout, "call_tool") {
+		t.Errorf("no way out is offered:\n%s", stdout)
+	}
+}
+
+// With everything exposed there is nothing left out, and a note saying so
+// would be noise.
+func TestToolsListIsQuietWhenNothingIsHidden(t *testing.T) {
+	address, cleanup := withTestServer(t, "probe")
+	defer cleanup()
+
+	_, stdout, _ := execute(t, "tools", "list", "--address", address)
+
+	if strings.Contains(stdout, "not exposed") {
+		t.Errorf("a note about hidden tools appears with none hidden:\n%s", stdout)
+	}
+}
+
 func TestToolsListShowsTheExposedNames(t *testing.T) {
 	address, cleanup := withTestServer(t, "probe")
 	defer cleanup()

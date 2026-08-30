@@ -150,15 +150,20 @@ func TestAggregateOfNothing(t *testing.T) {
 	}
 }
 
+// Nothing is exposed unless it is listed. The reason is in FilterTools'
+// own comment: a tools/list carrying every schema of every server costs a
+// model's context, and an unexposed tool is still reachable through
+// call_tool. These assertions are what stops that default being read as a
+// bug and "fixed" back the other way.
 func TestFilterTools(t *testing.T) {
 	tools := []*mcp.Tool{{Name: "read"}, {Name: "write"}, {Name: "delete"}}
 
-	t.Run("an empty allow list exposes everything", func(t *testing.T) {
-		if got := gateway.FilterTools(tools, nil); len(got) != 3 {
-			t.Errorf("kept %d tools, want all 3", len(got))
+	t.Run("nothing is exposed unless it is listed", func(t *testing.T) {
+		if got := gateway.FilterTools(tools, nil); len(got) != 0 {
+			t.Errorf("kept %d tools with no allow list, want none", len(got))
 		}
-		if got := gateway.FilterTools(tools, []string{}); len(got) != 3 {
-			t.Errorf("kept %d tools, want all 3", len(got))
+		if got := gateway.FilterTools(tools, []string{}); len(got) != 0 {
+			t.Errorf("kept %d tools with an empty allow list, want none", len(got))
 		}
 	})
 

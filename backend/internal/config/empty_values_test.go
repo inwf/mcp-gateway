@@ -41,6 +41,13 @@ func savedText(t *testing.T, cfg config.Config) string {
 // These are the values where "empty" and "absent" mean different things.
 // Dropping them on save would silently change what the configuration
 // says, so each one is pinned here against a future tidy-up.
+//
+// `exposedTools` is deliberately not one of them. Empty and absent both
+// mean "expose nothing", so omitting it on save changes nothing, and
+// there is no third meaning to reserve a spelling for. Anyone tempted to
+// make the two distinguishable — so that one of them could mean "expose
+// everything" — should read gateway.FilterTools first: a set that grows
+// on its own when an upstream adds a tool is the thing being avoided.
 func TestSavePreservesMeaningfulEmptyValues(t *testing.T) {
 	t.Run("an empty allowlist admits every client", func(t *testing.T) {
 		cfg := config.Default()
@@ -130,7 +137,7 @@ func TestOmittedServerFieldsReloadAsEmpty(t *testing.T) {
 		t.Errorf("env = %v, want empty", got.Env)
 	}
 	if len(got.ExposedTools) != 0 {
-		t.Errorf("exposedTools = %v, want empty; an empty list exposes every tool", got.ExposedTools)
+		t.Errorf("exposedTools = %v, want empty", got.ExposedTools)
 	}
 	if got.URL != "" {
 		t.Errorf("url = %q, want empty", got.URL)

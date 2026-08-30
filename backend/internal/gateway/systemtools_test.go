@@ -174,6 +174,47 @@ func resultText(result *mcp.CallToolResult) string {
 
 // twoServers is the fixture most tests use: one connected server with
 // two tools, one failed server.
+// exposing builds a configuration that exposes exactly the named tools.
+//
+// Nothing is exposed unless it is listed — see gateway.FilterTools for
+// why. That default is right for an installation and wrong for a test
+// about forwarding: such a test is asking what happens to a tool that is
+// on offer, so it has to put the tool on offer first. Spelling the names
+// out here is what makes each test say which tools it expects to travel.
+func exposing(t *testing.T, byServer map[string][]string) *config.Manager {
+	t.Helper()
+
+	servers := make(map[string]config.MCPServer, len(byServer))
+	for name, tools := range byServer {
+		servers[name] = config.MCPServer{
+			Transport:    config.TransportStdio,
+			Command:      "npx",
+			Enabled:      true,
+			Timeout:      time.Minute,
+			ExposedTools: tools,
+		}
+	}
+	return configFixture(t, servers)
+}
+
+// exposingEverything exposes every tool the given upstreams currently
+// offer, for the tests that are not about exposure at all.
+func exposingEverything(t *testing.T, ups gateway.Upstreams) *config.Manager {
+	t.Helper()
+
+	byServer := map[string][]string{}
+	for server, tools := range ups.Tools() {
+		names := make([]string, 0, len(tools))
+		for _, tool := range tools {
+			if tool != nil && tool.Name != "" {
+				names = append(names, tool.Name)
+			}
+		}
+		byServer[server] = names
+	}
+	return exposing(t, byServer)
+}
+
 func twoServers() *fakeUpstreams {
 	return &fakeUpstreams{
 		statuses: []upstream.Status{
@@ -194,12 +235,17 @@ func twoServers() *fakeUpstreams {
 	}
 }
 
+// twoServersConfig exposes "read" but not "write", so that tests can see
+// both an exposed tool and an unexposed one — which is what an ordinary
+// installation looks like, and what the reported exposed name has to
+// distinguish.
 func twoServersConfig(t *testing.T) *config.Manager {
 	return configFixture(t, map[string]config.MCPServer{
 		"files": {
 			Transport: config.TransportStdio, Command: "npx", Enabled: true,
 			Timeout: time.Minute, Description: "local filesystem",
-			Tags: map[string]string{"env": "dev", "kind": "fs"},
+			Tags:         map[string]string{"env": "dev", "kind": "fs"},
+			ExposedTools: []string{"read"},
 		},
 		"broken": {
 			Transport: config.TransportStdio, Command: "nope", Enabled: true,
@@ -330,6 +376,12 @@ func TestListTools(t *testing.T) {
 	// The exposed name is what a client would call directly.
 	if out.Tools[0].Exposed != "files_read" {
 		t.Errorf("exposed = %q, want files_read", out.Tools[0].Exposed)
+	}
+	// "write" is not exposed, so there is no name to call it by. The empty
+	// field is the signal to reach it through call_tool instead — and it
+	// must be empty rather than a name that was never registered.
+	if out.Tools[1].Exposed != "" {
+		t.Errorf("exposed = %q for an unexposed tool, want no name", out.Tools[1].Exposed)
 	}
 }
 

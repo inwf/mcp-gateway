@@ -220,7 +220,11 @@ type MCPServer struct {
 	Headers map[string]string `yaml:"headers,omitempty"`
 	Proxy   string            `yaml:"proxy,omitempty"`
 
-	// ExposedTools restricts which of this server's tools the gateway
-	// re-exposes. An empty list exposes all of them.
+	// ExposedTools names the tools of this server that the gateway offers
+	// in its own tools/list. Nothing is offered unless it is named here,
+	// and an absent list means the same as an empty one.
+	//
+	// The strict default is deliberate — see gateway.FilterTools for why,
+	// and for why it does not make the unnamed tools unreachable.
 	ExposedTools []string `yaml:"exposedTools,omitempty"`
 }

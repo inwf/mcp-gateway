@@ -54,10 +54,11 @@ const OWN = {
 /** A server as the API reports it: what was configured, and what came of
  *  connecting to it. */
 function view(name: string, overrides: Record<string, unknown> = {}) {
-  const { enabled = true, ...status } = overrides;
+  const { enabled = true, exposedCount = 0, ...status } = overrides;
   return {
     name,
     config: { transport: 'stdio', enabled, timeout: '30s', command: 'x' },
+    exposedCount,
     status: {
       name,
       state: 'connected',
@@ -159,6 +160,20 @@ describe('one group per server', () => {
     expect(headings.indexOf('files')).toBeLessThan(headings.indexOf('bing'));
   });
 
+  // The pair, not the count. The gateway offers nothing it has not been
+  // asked to, so a bare number reads as everything the server has.
+  it('reports how much of each server is exposed', async () => {
+    serving(FORWARDED, OWN, [
+      view('files', { exposedCount: 1, toolCount: 9 }),
+      view('bing', { exposedCount: 0, toolCount: 4 }),
+    ]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    expect(within(group('files')).getByText('已暴露 1 / 9')).toBeInTheDocument();
+    expect(within(group('bing')).getByText('已暴露 0 / 4')).toBeInTheDocument();
+  });
+
   it("reports each server's state on its group", async () => {
     serving(FORWARDED, OWN, [view('files'), view('bing', { state: 'failed', error: 'boom' })]);
     renderWithProviders(<Tools />);
@@ -177,7 +192,7 @@ describe('a server with no tools on offer', () => {
     renderWithProviders(<Tools />);
 
     await screen.findByRole('heading', { name: 'files' });
-    expect(within(group('files')).getByText('没有对外提供的工具')).toBeInTheDocument();
+    expect(within(group('files')).getByText('没有暴露任何工具')).toBeInTheDocument();
   });
 
   it('says the server is disabled when it is', async () => {
@@ -204,15 +219,18 @@ describe('a server with no tools on offer', () => {
     expect(within(group('files')).getByText(/本来就不提供工具/)).toBeInTheDocument();
   });
 
-  // The distinction worth drawing: the server has tools and none of them
-  // are ticked, which is a decision rather than a fault, and the thing to
-  // do about it is on a different page.
-  it('says the tools are all unexposed when the server has some', async () => {
+  // The ordinary case, not a fault: the gateway exposes nothing it has not
+  // been asked to, so a server that was just added contributes none of its
+  // tools. The group has to say that, and say they are still callable —
+  // otherwise it reads as a server that arrived broken.
+  it('says the tools are unexposed rather than missing, and still callable', async () => {
     serving([], OWN, [view('files', { toolCount: 4 })]);
     renderWithProviders(<Tools />);
 
     await screen.findByRole('heading', { name: 'files' });
-    expect(within(group('files')).getByText(/4 个工具都没有勾选/)).toBeInTheDocument();
+    const hint = within(group('files')).getByText(/4 个工具/);
+    expect(hint.textContent).toContain('没有勾选暴露');
+    expect(hint.textContent).toContain('call_tool');
   });
 });
 

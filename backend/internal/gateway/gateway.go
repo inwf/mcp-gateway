@@ -256,17 +256,7 @@ func (g *Gateway) Sync() {
 // collectTools gathers the upstream tools each server's configuration
 // allows to be exposed.
 func (g *Gateway) collectTools() map[string][]*mcp.Tool {
-	all := g.opts.Upstreams.Tools()
-	cfg := g.opts.Configs.Get()
-
-	out := make(map[string][]*mcp.Tool, len(all))
-	for server, tools := range all {
-		allowed := FilterTools(tools, cfg.MCPServers[server].ExposedTools)
-		if len(allowed) > 0 {
-			out[server] = allowed
-		}
-	}
-	return out
+	return ExposedByServer(g.opts.Upstreams.Tools(), g.opts.Configs.Get())
 }
 
 // forward sends a call to the upstream server the tool came from.

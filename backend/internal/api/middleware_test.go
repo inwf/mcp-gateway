@@ -94,12 +94,38 @@ func TestASuppliedRequestIDCannotForgeALogLine(t *testing.T) {
 	if strings.ContainsAny(got, "\"= ") {
 		t.Errorf("request id %q keeps characters that separate log fields", got)
 	}
-	if contains(got, "abc") {
-		t.Errorf("request id %q still echoes the supplied value", got)
+	// Sanitising is all or nothing, so the property to assert is that the
+	// forgery was dropped and a fresh identifier generated in its place.
+	//
+	// Asking whether the result still contains some fragment of the
+	// supplied value would not say that: a generated identifier is sixteen
+	// random hex characters, and one of those in a few hundred contains any
+	// given three-character sequence by chance. A test that fails once in
+	// three hundred runs is worse than no test.
+	if got == forgery {
+		t.Errorf("request id %q is the supplied value", got)
+	}
+	if !generatedRequestID(got) {
+		t.Errorf("request id %q is not a freshly generated one", got)
 	}
 	if text := logText(store); contains(text, "the disk is full") {
 		t.Errorf("a forged field reached the log:\n%s", text)
 	}
+}
+
+// generatedRequestID reports whether id has the shape newRequestID
+// produces: sixteen lowercase hex characters.
+func generatedRequestID(id string) bool {
+	if len(id) != 16 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		ch := id[i]
+		if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // Two clients sending different malformed identifiers must still be

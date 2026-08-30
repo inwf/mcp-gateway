@@ -118,7 +118,10 @@
 }
 
 .toolRow {
-  display: block;
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
   width: 100%;
   padding: 9px var(--space-4);
   border: 0;
@@ -133,6 +136,37 @@
   transition:
     background var(--fast) var(--ease),
     color var(--fast) var(--ease);
+}
+
+.toolRowName {
+  overflow-wrap: anywhere;
+}
+
+/* The name a client actually calls. Quieter than the upstream name
+   because it is derived from it, not a second thing to learn. */
+.toolExposed {
+  flex: none;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+
+/* The row is a row of two controls now, so the part that selects the tool
+   is its own button and the switch sits outside it. Nesting the switch
+   inside the button would make every toggle also change the selection. */
+.toolPick {
+  display: flex;
+  flex: 1;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .toolRow:hover {

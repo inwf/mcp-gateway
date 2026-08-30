@@ -35,6 +35,12 @@ type serverRow struct {
 		ServerName    string `json:"serverName"`
 		ServerVersion string `json:"serverVersion"`
 	} `json:"status"`
+
+	// ExposedCount is how many of the server's tools reach the gateway's
+	// tools/list. Nothing is exposed unless it is listed, so this is
+	// normally well below the tool count — printing the pair is what makes
+	// that visible instead of silent.
+	ExposedCount int `json:"exposedCount"`
 }
 
 func newServersCommand(global *globalOptions, stdout io.Writer) *cobra.Command {
@@ -76,6 +82,16 @@ func newServersListCommand(client *clientOptions, stdout io.Writer) *cobra.Comma
 	return cmd
 }
 
+// exposure renders how much of a server's toolbox reaches clients.
+//
+// The pair rather than either number alone: the gateway exposes nothing it
+// has not been told to expose, so "9" on its own reads as nine tools on
+// offer when the true answer may be none. "0/9" says both what the server
+// has and how much of it was asked for.
+func exposure(server serverRow) string {
+	return fmt.Sprintf("%d/%d", server.ExposedCount, server.Status.ToolCount)
+}
+
 func listServers(cmd *cobra.Command, client *clientOptions, stdout io.Writer, verbose bool) error {
 	gateway, err := client.connect()
 	if err != nil {
@@ -92,7 +108,7 @@ func listServers(cmd *cobra.Command, client *clientOptions, stdout io.Writer, ve
 		return nil
 	}
 
-	headings := []string{"NAME", "TRANSPORT", "ENABLED", "STATE", "TOOLS", "RESOURCES"}
+	headings := []string{"NAME", "TRANSPORT", "ENABLED", "STATE", "EXPOSED/TOOLS", "RESOURCES"}
 	if verbose {
 		headings = append(headings, "SERVER", "VERSION")
 	}
@@ -110,7 +126,7 @@ func listServers(cmd *cobra.Command, client *clientOptions, stdout io.Writer, ve
 			server.Config.Transport,
 			yesNo(server.Config.Enabled),
 			dash(server.Status.State),
-			strconv.Itoa(server.Status.ToolCount),
+			exposure(server),
 			strconv.Itoa(server.Status.ResourceCount),
 		}
 		if verbose {

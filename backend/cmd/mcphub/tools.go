@@ -62,6 +62,16 @@ type aggregatedTool struct {
 type toolSet struct {
 	system   []aggregatedTool
 	upstream []aggregatedTool
+
+	// unexposed counts, per server, the tools that exist upstream but are
+	// not offered in the gateway's tools/list.
+	//
+	// Listing only what is exposed would present a partial list as the
+	// whole one. Nothing is exposed unless it is asked for, so on an
+	// ordinary installation most of what is available is not in the table
+	// above — and a reader who is not told that will conclude the tools are
+	// missing rather than deferred.
+	unexposed map[string]int
 }
 
 func (s toolSet) all() []aggregatedTool {
@@ -69,6 +79,18 @@ func (s toolSet) all() []aggregatedTool {
 }
 
 func (s toolSet) empty() bool { return len(s.system) == 0 && len(s.upstream) == 0 }
+
+// hidden counts the unexposed tools, for one server or for all of them.
+func (s toolSet) hidden(server string) int {
+	if server != "" {
+		return s.unexposed[server]
+	}
+	total := 0
+	for _, count := range s.unexposed {
+		total += count
+	}
+	return total
+}
 
 type toolCallResponse struct {
 	IsError           bool            `json:"isError"`
@@ -158,7 +180,33 @@ func fetchTools(ctx context.Context, gateway *gatewayClient, search string) (too
 		return toolSet{}, err
 	}
 
-	return toolSet{system: system, upstream: forwarded.Tools}, nil
+	unexposed, err := fetchUnexposedCounts(ctx, gateway)
+	if err != nil {
+		return toolSet{}, err
+	}
+
+	return toolSet{system: system, upstream: forwarded.Tools, unexposed: unexposed}, nil
+}
+
+// fetchUnexposedCounts asks how many tools each server has that the
+// gateway is not offering.
+//
+// The tools endpoint cannot say: it reports what is exposed and has no
+// reason to know what was left out. The server list has both numbers,
+// having been given them by the one place that can compare them.
+func fetchUnexposedCounts(ctx context.Context, gateway *gatewayClient) (map[string]int, error) {
+	var response serverListResponse
+	if err := gateway.get(ctx, "/servers", &response); err != nil {
+		return nil, err
+	}
+
+	out := map[string]int{}
+	for _, server := range response.Servers {
+		if hidden := server.Status.ToolCount - server.ExposedCount; hidden > 0 {
+			out[server.Name] = hidden
+		}
+	}
+	return out, nil
 }
 
 func fetchSystemTools(ctx context.Context, gateway *gatewayClient, search string) ([]aggregatedTool, error) {
@@ -230,6 +278,7 @@ func printTools(stdout io.Writer, tools toolSet, server, search string) error {
 
 	if tools.empty() {
 		fmt.Fprintln(stdout, nothingToShow(server, search))
+		printHidden(stdout, tools.hidden(server))
 		return nil
 	}
 
@@ -257,7 +306,34 @@ func printTools(stdout io.Writer, tools toolSet, server, search string) error {
 	if len(tools.upstream) == listLimit {
 		fmt.Fprintf(stdout, "\nstopped at %d tools; there may be more\n", listLimit)
 	}
+	printHidden(stdout, tools.hidden(server))
 	return nil
+}
+
+// printHidden says how much was left out, so the table above is not read
+// as the whole of what is available.
+//
+// It does not point at a command that lists the hidden tools, because
+// there is not one: `tools list --server` narrows this same exposed set.
+// Saying only what is true is the point — the count plus the way to reach
+// them is more use than a suggestion that leads nowhere.
+func printHidden(stdout io.Writer, hidden int) {
+	if hidden == 0 {
+		return
+	}
+	fmt.Fprintf(stdout,
+		"\n%d more upstream %s not exposed, and so not in the list above.\n"+
+			"Nothing is exposed unless the configuration asks for it; reach the rest\n"+
+			"through the %s gateway tool, or expose them in the web interface.\n",
+		hidden, plural(hidden, "tool is", "tools are"), gateway.ToolCallTool)
+}
+
+// plural picks between two forms, because "1 tools are" reads as a bug.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func nothingToShow(server, search string) string {
