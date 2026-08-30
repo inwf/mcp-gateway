@@ -25,7 +25,10 @@ export function Panel({
     <section className={cx(styles.panel, className)}>
       <header className={styles.head}>
         <div className={styles.title}>
-          <span className="label">{title}</span>
+          {/* A heading element rather than a styled span: these are the
+              only headings on most pages, and a reader that cannot see
+              the panel's border has nothing else to navigate by. */}
+          <h2 className={cx('label', styles.heading)}>{title}</h2>
           {count !== undefined ? <span className={styles.count}>{count}</span> : null}
         </div>
         {actions ? <div className={styles.actions}>{actions}</div> : null}

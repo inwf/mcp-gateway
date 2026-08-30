@@ -170,6 +170,15 @@ export const zh = {
     system: '系统工具',
     fromServers: '服务器工具',
     builtIn: '网关自带',
+    groupEmpty: '没有对外提供的工具',
+    groupDisabled: '这台服务器已停用，启用之后它的工具会出现在这里',
+    groupFailed: '连接失败，所以拿不到工具列表 —— 状态上悬停可以看到原因',
+    groupOffline: '还没有连接上，连上之后它的工具会出现在这里',
+    groupNoCapability: '这台服务器没有声明工具能力，本来就不提供工具',
+    groupNoTools: '这台服务器已连接，但一个工具都没有提供',
+    groupAllHidden: '这台服务器的 {{count}} 个工具都没有勾选对外开放',
+    groupTruncated: '列表在上限处截断了，这台服务器的工具可能只是没被列出来',
+    truncated: '只列出了前 {{count}} 个工具，后面还有 —— 用搜索或者服务器筛选缩小范围',
   },
 
   call: {

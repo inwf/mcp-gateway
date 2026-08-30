@@ -47,7 +47,8 @@
 }
 
 /* The exposed name is what a client actually calls, so it is the
-   headline. The upstream name and server are the provenance beneath. */
+   headline. The upstream name is the provenance beneath; the server is
+   not repeated here, because the group the card is in says it. */
 .exposed {
   font-family: var(--font-mono);
   font-size: var(--text-base);
@@ -55,8 +56,20 @@
   overflow-wrap: anywhere;
 }
 
-.server {
-  flex: none;
+/* A server's name in its group heading. Panel titles are set as small
+   uppercase labels, which is wrong for a name that has to be typed back
+   exactly as it was configured. */
+.serverName {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+/* Where a server group carries a state badge, the gateway's carries a
+   word instead: it has no connection to report. */
+.mark {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--info);
@@ -97,4 +110,13 @@
    the name a client must use is not the name the server gave it. */
 .renamed {
   color: var(--warn);
+}
+
+/* The list stopped at its limit. Said once at the end rather than on
+   every group, because it is a fact about the request. */
+.truncated {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--warn);
+  text-align: center;
 }

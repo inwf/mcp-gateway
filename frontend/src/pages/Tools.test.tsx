@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
@@ -11,10 +11,17 @@ beforeAll(() => api.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => api.resetHandlers());
 afterAll(() => api.close());
 
-// The gateway serves its own tools to every client alongside the
-// forwarded ones. This page showed only the forwarded ones, so the seven
-// that a model uses to find its way around an installation were invisible
-// here while being served perfectly well over MCP.
+// Two things this page got wrong, both of them omissions.
+//
+// The gateway serves its own tools to every client alongside the forwarded
+// ones, and this page showed only the forwarded ones — so the tools a
+// model uses to find its way around an installation were invisible here
+// while being served perfectly well over MCP.
+//
+// And the forwarded ones were one flat list. Which server a tool came
+// from was a word on its card, so "what does this server offer" meant
+// reading every card, and "why is this server contributing nothing" had
+// no answer on the page at all.
 
 const FORWARDED = [
   {
@@ -44,15 +51,47 @@ const OWN = {
   systemTools: ['list_servers', 'search_tools'],
 };
 
-function serving(forwarded = FORWARDED, own = OWN) {
+/** A server as the API reports it: what was configured, and what came of
+ *  connecting to it. */
+function view(name: string, overrides: Record<string, unknown> = {}) {
+  const { enabled = true, ...status } = overrides;
+  return {
+    name,
+    config: { transport: 'stdio', enabled, timeout: '30s', command: 'x' },
+    status: {
+      name,
+      state: 'connected',
+      toolCount: 1,
+      resourceCount: 0,
+      hasTools: true,
+      hasResources: false,
+      ...status,
+    },
+  };
+}
+
+const VIEWS = [view('files'), view('bing')];
+
+function serving(forwarded = FORWARDED, own = OWN, views: unknown[] = VIEWS) {
   api.use(
     http.get('/api/tools', () => HttpResponse.json({ tools: forwarded, total: forwarded.length })),
     http.get('/api/gateway/tools', () => HttpResponse.json(own)),
+    http.get('/api/servers', () => HttpResponse.json({ servers: views })),
   );
 }
 
-describe('the two kinds of tool', () => {
-  it("shows the gateway's own tools", async () => {
+/** The panel whose heading is this name. Server names appear in the
+ *  server filter's options as well, so a group has to be found by its
+ *  heading rather than by the text alone. */
+function group(name: string): HTMLElement {
+  const heading = screen.getByRole('heading', { name });
+  const panel = heading.closest('section');
+  if (!panel) throw new Error(`the heading for ${name} is not inside a panel`);
+  return panel;
+}
+
+describe("the gateway's own tools", () => {
+  it('are shown', async () => {
     serving();
     renderWithProviders(<Tools />);
 
@@ -60,19 +99,19 @@ describe('the two kinds of tool', () => {
     expect(screen.getByText('search_tools')).toBeInTheDocument();
   });
 
-  it('shows them apart from the forwarded ones', async () => {
+  it('are shown in a group of their own, not under a server', async () => {
     serving();
     renderWithProviders(<Tools />);
 
     await screen.findByText('list_servers');
-    expect(screen.getByText('系统工具')).toBeInTheDocument();
-    expect(screen.getByText('服务器工具')).toBeInTheDocument();
+    expect(within(group('系统工具')).getByText('list_servers')).toBeInTheDocument();
+    expect(within(group('files')).queryByText('list_servers')).not.toBeInTheDocument();
   });
 
   // The gateway publishes its own tools and the forwarded ones through
   // the same endpoint. Taking all of them would list every forwarded tool
   // a second time, under the group that says they belong to no server.
-  it('counts only the tools the gateway names as its own', async () => {
+  it('do not include the forwarded ones', async () => {
     serving();
     renderWithProviders(<Tools />);
 
@@ -80,7 +119,7 @@ describe('the two kinds of tool', () => {
     expect(screen.getAllByText('files_read')).toHaveLength(1);
   });
 
-  it('sends a forwarded tool to its server and a gateway tool to the gateway', async () => {
+  it('are called through the gateway rather than through a server', async () => {
     let path = '';
     serving();
     api.use(
@@ -92,20 +131,95 @@ describe('the two kinds of tool', () => {
     renderWithProviders(<Tools />);
 
     await screen.findByText('list_servers');
-    const buttons = screen.getAllByRole('button', { name: /调用/ });
-
-    // The gateway's group comes first, so its first button is a gateway
-    // tool's.
-    await userEvent.click(buttons[0]!);
+    const own = within(group('系统工具'));
+    await userEvent.click(own.getAllByRole('button', { name: /调用/ })[0]!);
     await userEvent.click(screen.getByRole('button', { name: '执行' }));
+
     await waitFor(() => expect(path).toBe('/api/gateway/tools/list_servers/call'));
+  });
+});
+
+describe('one group per server', () => {
+  it('puts each tool under the server it came from', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    expect(within(group('files')).getByText('files_read')).toBeInTheDocument();
+    expect(within(group('bing')).getByText('bing_search')).toBeInTheDocument();
+    expect(within(group('files')).queryByText('bing_search')).not.toBeInTheDocument();
+  });
+
+  it('follows the order of the server list', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    const headings = screen.getAllByRole('heading').map((node) => node.textContent);
+    expect(headings.indexOf('files')).toBeLessThan(headings.indexOf('bing'));
+  });
+
+  it("reports each server's state on its group", async () => {
+    serving(FORWARDED, OWN, [view('files'), view('bing', { state: 'failed', error: 'boom' })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    expect(within(group('bing')).getByText('连接失败')).toBeInTheDocument();
+  });
+});
+
+// A server contributing nothing is the case a flat list could not
+// express: it simply was not there, which looks the same as never having
+// been configured.
+describe('a server with no tools on offer', () => {
+  it('still has a group', async () => {
+    serving([], OWN, [view('files', { toolCount: 0 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    expect(within(group('files')).getByText('没有对外提供的工具')).toBeInTheDocument();
+  });
+
+  it('says the server is disabled when it is', async () => {
+    serving([], OWN, [view('files', { enabled: false, state: 'disconnected', toolCount: 0 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    expect(within(group('files')).getByText(/启用之后它的工具/)).toBeInTheDocument();
+  });
+
+  it('says the connection failed when it did', async () => {
+    serving([], OWN, [view('files', { state: 'failed', error: 'boom', toolCount: 0 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    expect(within(group('files')).getByText(/拿不到工具列表/)).toBeInTheDocument();
+  });
+
+  it('says the server declares no tools when it does not', async () => {
+    serving([], OWN, [view('files', { hasTools: false, toolCount: 0 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    expect(within(group('files')).getByText(/本来就不提供工具/)).toBeInTheDocument();
+  });
+
+  // The distinction worth drawing: the server has tools and none of them
+  // are ticked, which is a decision rather than a fault, and the thing to
+  // do about it is on a different page.
+  it('says the tools are all unexposed when the server has some', async () => {
+    serving([], OWN, [view('files', { toolCount: 4 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    expect(within(group('files')).getByText(/4 个工具都没有勾选/)).toBeInTheDocument();
   });
 });
 
 describe('narrowing the list', () => {
   // Picking a server asks about that server. The gateway's own tools are
   // on no server, so they are not an answer to it.
-  it("leaves out the gateway's own tools when a server is picked", async () => {
+  it("leaves out the other servers and the gateway's own tools", async () => {
     serving();
     renderWithProviders(<Tools />);
 
@@ -115,7 +229,18 @@ describe('narrowing the list', () => {
 
     await waitFor(() => expect(screen.queryByText('list_servers')).not.toBeInTheDocument());
     expect(screen.getByText('files_read')).toBeInTheDocument();
-    expect(screen.queryByText('bing_search')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'bing' })).not.toBeInTheDocument();
+  });
+
+  // Every configured server is on offer in the filter, including one with
+  // no tools — asking about it is how its group's explanation is reached.
+  it('offers a server with no tools in the filter', async () => {
+    serving([], OWN, [view('quiet', { toolCount: 0 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'quiet' });
+    await userEvent.click(screen.getByRole('combobox'));
+    expect(await screen.findByTitle('quiet')).toBeInTheDocument();
   });
 
   // The gateway ranks the forwarded tools; these are filtered here. A
@@ -130,5 +255,84 @@ describe('narrowing the list', () => {
 
     await waitFor(() => expect(screen.queryByText('search_tools')).not.toBeInTheDocument());
     expect(screen.getByText('list_servers')).toBeInTheDocument();
+  });
+
+  // Under a search a group with nothing in it is not part of the answer,
+  // where without one it is reporting the state of its server.
+  it('drops the groups a search did not reach', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'bing' });
+    api.use(
+      http.get('/api/tools', () =>
+        HttpResponse.json({ tools: [FORWARDED[0]], total: 1 }),
+      ),
+    );
+    await userEvent.type(screen.getByRole('searchbox'), 'disk');
+
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'bing' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('heading', { name: 'files' })).toBeInTheDocument();
+  });
+
+  it('says so when nothing matched at all', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    api.use(
+      http.get('/api/tools', () => HttpResponse.json({ tools: [], total: 0 })),
+      http.get('/api/gateway/tools', () =>
+        HttpResponse.json({ tools: [], total: 0, systemTools: [] }),
+      ),
+    );
+    await userEvent.type(screen.getByRole('searchbox'), 'nothing like this');
+
+    expect(await screen.findByText('没有匹配的工具')).toBeInTheDocument();
+  });
+});
+
+describe('no servers configured', () => {
+  it('says so rather than reporting that nothing matched', async () => {
+    serving([], OWN, []);
+    renderWithProviders(<Tools />);
+
+    expect(await screen.findByText('没有可用的工具')).toBeInTheDocument();
+    // The gateway's own tools are still on offer, and still shown.
+    expect(screen.getByText('list_servers')).toBeInTheDocument();
+  });
+});
+
+// The endpoint reports the number of tools it returned, not the number it
+// had, so a list cut off at the limit is indistinguishable from a complete
+// one — and every group count on the page is then a lower bound.
+describe('a list that hit the limit', () => {
+  const many = Array.from({ length: 200 }, (_, i) => ({
+    server: 'files',
+    tool: `t${i}`,
+    exposed: `files_t${i}`,
+    description: `tool number ${i}`,
+  }));
+
+  it('says the list was cut off', async () => {
+    serving(many);
+    renderWithProviders(<Tools />);
+
+    expect(await screen.findByText(/只列出了前 200 个工具/)).toBeInTheDocument();
+  });
+
+  // Alphabetical order by exposed name means the servers late in the
+  // alphabet are the ones cut, so "this server exposes nothing" is
+  // exactly the wrong conclusion to state confidently.
+  it('does not claim an empty group has nothing to offer', async () => {
+    serving(many, OWN, [view('files', { toolCount: 200 }), view('zzz', { toolCount: 7 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'zzz' });
+    const empty = within(group('zzz'));
+    expect(empty.getByText(/可能只是没被列出来/)).toBeInTheDocument();
+    expect(empty.queryByText(/都没有勾选对外开放/)).not.toBeInTheDocument();
   });
 });
