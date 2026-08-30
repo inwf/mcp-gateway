@@ -27,8 +27,8 @@ export const keys = {
 
   tools: {
     all: ['tools'] as const,
-    aggregated: (search: string, tags: string[]) =>
-      [...keys.tools.all, 'aggregated', search, [...tags].sort()] as const,
+    aggregated: (search: string, tags: string[], all = false) =>
+      [...keys.tools.all, 'aggregated', search, [...tags].sort(), all] as const,
   },
 
   resources: {

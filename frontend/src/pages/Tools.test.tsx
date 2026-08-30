@@ -192,7 +192,7 @@ describe('a server with no tools on offer', () => {
     renderWithProviders(<Tools />);
 
     await screen.findByRole('heading', { name: 'files' });
-    expect(within(group('files')).getByText('没有暴露任何工具')).toBeInTheDocument();
+    expect(within(group('files')).getByText('没有工具')).toBeInTheDocument();
   });
 
   it('says the server is disabled when it is', async () => {
@@ -219,23 +219,155 @@ describe('a server with no tools on offer', () => {
     expect(within(group('files')).getByText(/本来就不提供工具/)).toBeInTheDocument();
   });
 
-  // The ordinary case, not a fault: the gateway exposes nothing it has not
-  // been asked to, so a server that was just added contributes none of its
-  // tools. The group has to say that, and say they are still callable —
-  // otherwise it reads as a server that arrived broken.
-  it('says the tools are unexposed rather than missing, and still callable', async () => {
-    serving([], OWN, [view('files', { toolCount: 4 })]);
+  // The state most servers are in is not an empty group at all: the page
+  // lists every tool a server offers, exposed or not, because it is where
+  // exposure is decided. A group only comes up empty when the server truly
+  // has nothing.
+  it('lists unexposed tools rather than leaving the group empty', async () => {
+    serving(
+      [
+        { server: 'files', tool: 'read', exposed: 'files_read', description: 'read a file' },
+        // No exposed name: not in the gateway's tools/list.
+        { server: 'files', tool: 'write', exposed: '', description: 'put a file somewhere' },
+      ],
+      OWN,
+      [view('files', { exposedCount: 1, toolCount: 2 })],
+    );
     renderWithProviders(<Tools />);
 
     await screen.findByRole('heading', { name: 'files' });
-    const hint = within(group('files')).getByText(/4 个工具/);
-    expect(hint.textContent).toContain('没有勾选暴露');
-    expect(hint.textContent).toContain('call_tool');
+    const files = within(group('files'));
+    expect(files.getByText('files_read')).toBeInTheDocument();
+    // The unexposed one is shown under its own name, since it has no other.
+    expect(files.getByText('write')).toBeInTheDocument();
+    expect(files.queryByText('没有工具')).not.toBeInTheDocument();
   });
 });
 
-describe('narrowing the list', () => {
-  // Picking a server asks about that server. The gateway's own tools are
+// This page is where exposure is decided, so every tool needs a switch on
+// it — including, and especially, the ones that are not exposed. Showing
+// only the exposed ones left a fresh installation with an empty page and
+// nothing to click.
+describe('deciding what to expose', () => {
+  const MIXED = [
+    { server: 'files', tool: 'read', exposed: 'files_read', description: 'read a file' },
+    { server: 'files', tool: 'write', exposed: '', description: 'put a file somewhere' },
+  ];
+
+  function withFiles(exposedTools: string[] | undefined) {
+    const base = view('files', { exposedCount: exposedTools?.length ?? 0, toolCount: 2 });
+    return [{ ...base, config: { ...base.config, exposedTools } }];
+  }
+
+  it('offers a switch for every tool, exposed or not', async () => {
+    serving(MIXED, OWN, withFiles(['read']));
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    const switches = within(group('files')).getAllByRole('switch');
+    expect(switches).toHaveLength(2);
+    expect(switches[0]).toBeChecked();
+    expect(switches[1]).not.toBeChecked();
+  });
+
+  // The gateway's own tools are not a server's, and there is nothing to
+  // decide about them: they are always on offer.
+  it('offers no switch for the gateway’s own tools', async () => {
+    serving(MIXED, OWN, withFiles(['read']));
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('list_servers');
+    expect(within(group('系统工具')).queryAllByRole('switch')).toHaveLength(0);
+  });
+
+  it('writes the whole allow list when a tool is switched on', async () => {
+    let body: unknown = null;
+    serving(MIXED, OWN, withFiles(['read']));
+    api.use(
+      http.put('/api/servers/files', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({});
+      }),
+    );
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    await userEvent.click(within(group('files')).getAllByRole('switch')[1]!);
+
+    await waitFor(() => expect(body).not.toBeNull());
+    // Under a key, and the whole list rather than a delta. Getting either
+    // wrong fails silently — the write succeeds and changes nothing.
+    expect(body).toMatchObject({ server: { exposedTools: ['read', 'write'] } });
+  });
+
+  it('writes the list without the tool when one is switched off', async () => {
+    let body: unknown = null;
+    serving(MIXED, OWN, withFiles(['read']));
+    api.use(
+      http.put('/api/servers/files', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({});
+      }),
+    );
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    await userEvent.click(within(group('files')).getAllByRole('switch')[0]!);
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body).toMatchObject({ server: { exposedTools: [] } });
+  });
+
+  // The state a fresh installation is in: nothing exposed anywhere, which
+  // is exactly when the page has to be usable.
+  it('works from a server that exposes nothing at all', async () => {
+    let body: unknown = null;
+    serving(
+      [
+        { server: 'files', tool: 'read', exposed: '', description: 'read a file' },
+        { server: 'files', tool: 'write', exposed: '', description: 'put a file somewhere' },
+      ],
+      OWN,
+      withFiles(undefined),
+    );
+    api.use(
+      http.put('/api/servers/files', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({});
+      }),
+    );
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    const switches = within(group('files')).getAllByRole('switch');
+    expect(switches).toHaveLength(2);
+    expect(switches[0]).not.toBeChecked();
+
+    await userEvent.click(switches[0]!);
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body).toMatchObject({ server: { exposedTools: ['read'] } });
+  });
+
+  it('says so when the write fails', async () => {
+    serving(MIXED, OWN, withFiles(['read']));
+    api.use(
+      http.put('/api/servers/files', () =>
+        HttpResponse.json(
+          { error: { code: 'invalid', message: 'the server is not valid' } },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'files' });
+    await userEvent.click(within(group('files')).getAllByRole('switch')[0]!);
+
+    expect(await screen.findByText(/the server is not valid/)).toBeInTheDocument();
+  });
+});
+
+describe('narrowing the list', () => {  // Picking a server asks about that server. The gateway's own tools are
   // on no server, so they are not an answer to it.
   it("leaves out the other servers and the gateway's own tools", async () => {
     serving();

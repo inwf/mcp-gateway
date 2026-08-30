@@ -112,10 +112,14 @@ export const endpoints = {
 
   // ===== aggregated =====
 
-  tools: (options: { search?: string; tags?: string[]; limit?: number } = {}) => {
+  /** `all` asks for every upstream tool rather than only the exposed
+   *  ones. The management interface wants that: it is where exposure is
+   *  decided, and it cannot offer a choice about tools it does not show. */
+  tools: (options: { search?: string; tags?: string[]; limit?: number; all?: boolean } = {}) => {
     const query: Record<string, string | number> = {};
     if (options.search) query['q'] = options.search;
     if (options.limit) query['limit'] = options.limit;
+    if (options.all) query['all'] = 'true';
     const path = buildTagQuery(`${BASE}/tools`, options.tags);
     return api
       .get<{ tools: AggregatedTool[]; total: number }>(path, { query })

@@ -143,6 +143,31 @@ func TestApplyIgnoresPresentationOnlyChanges(t *testing.T) {
 	}
 }
 
+// Exposure is decided on the gateway side; this package never reads the
+// allow list. Rebuilding the connection for it would kill and respawn a
+// child process every time someone switched one tool on, which — now that
+// switching tools on is the ordinary way to use the thing — would be a
+// process restart per click.
+func TestApplyDoesNotRestartAServerForAnExposureChange(t *testing.T) {
+	m, _ := managerFixture(t)
+	cfg := configWith(t, map[string]string{"alpha": modeFull})
+	m.Apply(cfg)
+	before, _ := m.Get("alpha")
+
+	server := cfg.MCPServers["alpha"]
+	server.ExposedTools = []string{"echo"}
+	cfg.MCPServers["alpha"] = server
+
+	_, _, changed := m.Apply(cfg)
+
+	if len(changed) != 0 {
+		t.Errorf("changed = %v, want none; exposing one tool restarted the server", changed)
+	}
+	if after, _ := m.Get("alpha"); before != after {
+		t.Error("the connection was rebuilt for a change the connection cannot see")
+	}
+}
+
 func TestConnectAllBringsUpEveryEnabledServer(t *testing.T) {
 	m, _ := managerFixture(t)
 	m.Apply(configWith(t, map[string]string{"alpha": modeFull, "bravo": modeToolsOnly}))

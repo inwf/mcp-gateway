@@ -34,6 +34,18 @@
     transform var(--fast) var(--ease);
 }
 
+/* Not exposed. Dimmed rather than hidden: this page is where exposure is
+   decided, so the tools to decide about have to be on it. Most tools on an
+   ordinary installation are in this state, which is why it reads as quiet
+   rather than as a warning. */
+.cardOff {
+  border-style: dashed;
+}
+
+.cardOff .exposed {
+  color: var(--ink-muted);
+}
+
 .card:hover {
   border-color: var(--line-accent);
   transform: translateY(-1px);

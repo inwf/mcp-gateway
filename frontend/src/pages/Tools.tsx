@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Select, Skeleton, Tooltip } from 'antd';
+import { Button, Input, Select, Skeleton, Switch, Tooltip } from 'antd';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
@@ -12,6 +12,7 @@ import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
 import { Reveal } from '@/components/Reveal';
 import { ToolCallDialog } from '@/components/ToolCallDialog';
+import { useExposure } from '@/hooks/use-exposure';
 import { cx } from '@/lib/cx';
 import styles from './Tools.module.css';
 
@@ -86,15 +87,14 @@ function matching(tools: AggregatedTool[], search: string): AggregatedTool[] {
 /**
  * Why a server's group has nothing in it.
  *
- * Five facts leading to five different things to do about it: enable the
- * server, read the error, wait for the connection, accept that it has no
- * tools, or open its exposed-tools list and tick something. "No tools"
- * alone would leave all five looking the same.
+ * Four facts leading to four different things to do about it: enable the
+ * server, read the error, wait for the connection, or accept that it has
+ * no tools. "No tools" alone would leave all four looking the same.
  *
- * The last of those is the ordinary case rather than a fault. The gateway
- * exposes nothing it has not been asked to, so a freshly added server
- * contributes none of its tools — and its group says so, along with the
- * fact that a model can still call them.
+ * "Has tools but exposes none" is not among them, because this page lists
+ * every tool a server offers rather than only the exposed ones — that is
+ * the state most servers are in, and it is a state with something to click
+ * rather than something to explain.
  *
  * A group without a server view only exists because it has tools in it,
  * so there is nothing to explain in that case.
@@ -112,43 +112,75 @@ function emptyHint(view: ServerView | undefined, truncated: boolean, t: Translat
   if (status.state === 'failed') return t('tools.groupFailed');
   if (status.state !== 'connected') return t('tools.groupOffline');
   if (!status.hasTools) return t('tools.groupNoCapability');
-
-  if (status.toolCount > 0) return t('tools.groupAllHidden', { count: status.toolCount });
   return t('tools.groupNoTools');
 }
 
 function ToolCard({
   tool,
   index,
+  view,
   onCall,
 }: {
   tool: AggregatedTool;
   index: number;
+  /** The server this tool belongs to, absent for the gateway's own. */
+  view?: ServerView | undefined;
   onCall: () => void;
 }) {
   const { t } = useTranslation();
+  const expose = useExposure();
 
   // The gateway prefixes and, on a collision, renames. What a client must
   // call is `exposed`, which is not always derivable from the upstream
   // name. A gateway tool has no server and is never renamed.
-  const renamed = tool.server !== '' && !tool.exposed.endsWith(tool.tool);
+  const renamed = tool.server !== '' && tool.exposed !== '' && !tool.exposed.endsWith(tool.tool);
+  const on = tool.exposed !== '';
+  const busy = expose.isPending && expose.variables?.tool === tool.tool;
 
   return (
     <Reveal index={index}>
-      <div className={styles.card}>
+      <div className={cx(styles.card, !on && tool.server !== '' && styles.cardOff)}>
         <div className={styles.head}>
-          <span className={styles.exposed}>{tool.exposed}</span>
+          {/* The name a client calls, where there is one. An unexposed
+              tool has none, so its own name is the headline instead —
+              rather than an empty line where a name should be. */}
+          <span className={styles.exposed}>{tool.exposed || tool.tool}</span>
+          {view ? (
+            <Tooltip title={on ? t('tools.unexpose') : t('tools.expose')}>
+              <Switch
+                size="small"
+                checked={on}
+                loading={busy}
+                disabled={expose.isPending}
+                onChange={(next) =>
+                  expose.mutate({
+                    server: view.name,
+                    config: view.config,
+                    tool: tool.tool,
+                    on: next,
+                  })
+                }
+                aria-label={`${t('tools.expose')} ${tool.tool}`}
+              />
+            </Tooltip>
+          ) : null}
         </div>
 
         {tool.description ? <p className={styles.description}>{tool.description}</p> : null}
 
         <div className={styles.foot}>
-          {tool.server ? (
+          {tool.server === '' ? (
+            <span className={styles.origin}>{t('tools.builtIn')}</span>
+          ) : on ? (
             <Tooltip title={`${t('tools.from')} ${tool.server} · ${tool.tool}`}>
               <span className={cx(styles.origin, renamed && styles.renamed)}>{tool.tool}</span>
             </Tooltip>
           ) : (
-            <span className={styles.origin}>{t('tools.builtIn')}</span>
+            // The upstream name is already the headline for an unexposed
+            // tool, so repeating it here would say nothing. What is worth
+            // saying is the state, in words rather than only as a switch
+            // and a dashed border.
+            <span className={styles.origin}>{t('server.notExposed')}</span>
           )}
           <Button size="small" icon={<ThunderboltOutlined aria-hidden />} onClick={onCall}>
             {t('tools.call')}
@@ -161,15 +193,25 @@ function ToolCard({
 
 function ToolGrid({
   tools,
+  view,
   onCall,
 }: {
   tools: AggregatedTool[];
+  view?: ServerView | undefined;
   onCall: (tool: AggregatedTool) => void;
 }) {
   return (
     <div className={styles.grid}>
       {tools.map((tool, index) => (
-        <ToolCard key={tool.exposed} tool={tool} index={index} onCall={() => onCall(tool)} />
+        // Keyed by origin, not by exposed name: every unexposed tool has
+        // the same empty one.
+        <ToolCard
+          key={`${tool.server}/${tool.tool}`}
+          tool={tool}
+          index={index}
+          view={view}
+          onCall={() => onCall(tool)}
+        />
       ))}
     </div>
   );
@@ -185,8 +227,8 @@ export default function Tools() {
   // The search runs on the gateway rather than here: it scores matches
   // across every connected server, and the result order is that score.
   const tools = useQuery({
-    queryKey: keys.tools.aggregated(search, []),
-    queryFn: () => endpoints.tools({ ...(search ? { search } : {}), limit: LIMIT }),
+    queryKey: keys.tools.aggregated(search, [], true),
+    queryFn: () => endpoints.tools({ ...(search ? { search } : {}), limit: LIMIT, all: true }),
   });
 
   // The gateway's own tools come from the endpoint that reports what its
@@ -363,7 +405,7 @@ export default function Tools() {
               {group.tools.length === 0 ? (
                 <Nothing title={t('tools.groupEmpty')} hint={emptyHint(group.view, truncated, t)} />
               ) : (
-                <ToolGrid tools={group.tools} onCall={setCalling} />
+                <ToolGrid tools={group.tools} view={group.view} onCall={setCalling} />
               )}
             </Panel>
           ))}

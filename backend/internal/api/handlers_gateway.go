@@ -56,6 +56,20 @@ func (a *API) handleAggregatedTools(c *gin.Context) {
 	// would see collisions the registered set does not have.
 	names := gateway.PublishedNames(byServer, cfg)
 
+	// `all` asks for every upstream tool rather than the exposed ones.
+	//
+	// The default is what an MCP client would see, which is what the CLI
+	// wants. A management interface wants the opposite: it is where
+	// exposure is decided, so showing only what is already exposed leaves
+	// nothing to decide about — and on a fresh installation, nothing at
+	// all. The unexposed ones come back with an empty exposed name, which
+	// is the same signal list_tools gives.
+	all, err := queryBool(c, "all", false)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+
 	// Tag filters are applied to the servers first, because a tag
 	// belongs to a server rather than to a tool.
 	wanted := parseTagFilter(c.QueryArray("tag"))
@@ -66,9 +80,14 @@ func (a *API) handleAggregatedTools(c *gin.Context) {
 		if !matchesTags(serverCfg.Tags, wanted) {
 			continue
 		}
-		// A tool the configuration does not expose is not on offer
-		// through the gateway, so listing it here would be misleading.
-		for _, tool := range gateway.FilterTools(list, serverCfg.ExposedTools) {
+		offered := list
+		if !all {
+			offered = gateway.FilterTools(list, serverCfg.ExposedTools)
+		}
+		for _, tool := range offered {
+			if tool == nil || tool.Name == "" {
+				continue
+			}
 			exposed, _ := names.Exposed(server, tool.Name)
 			tools = append(tools, AggregatedTool{
 				Server:      server,
@@ -84,7 +103,15 @@ func (a *API) handleAggregatedTools(c *gin.Context) {
 	if query := strings.TrimSpace(c.Query("q")); query != "" {
 		tools = searchWithin(query, tools, limit)
 	} else {
-		sort.Slice(tools, func(i, j int) bool { return tools[i].Exposed < tools[j].Exposed })
+		// Sorted by where the tool came from, because an unexposed tool has
+		// no exposed name to sort by and they would all collide at the
+		// front of the list.
+		sort.Slice(tools, func(i, j int) bool {
+			if tools[i].Server != tools[j].Server {
+				return tools[i].Server < tools[j].Server
+			}
+			return tools[i].Tool < tools[j].Tool
+		})
 		if len(tools) > limit {
 			tools = tools[:limit]
 		}
@@ -106,15 +133,22 @@ func searchWithin(query string, tools []AggregatedTool, limit int) []AggregatedT
 		})
 	}
 
-	byExposed := make(map[string]AggregatedTool, len(tools))
+	// Keyed by where the tool came from rather than by its exposed name.
+	// An unexposed tool has no exposed name, so every one of them would
+	// key on the empty string and all but one would be lost.
+	type origin struct{ server, tool string }
+	byOrigin := make(map[origin]AggregatedTool, len(tools))
 	for _, tool := range tools {
-		byExposed[tool.Exposed] = tool
+		byOrigin[origin{tool.Server, tool.Tool}] = tool
 	}
 
 	hits := gateway.SearchTools(query, candidates, limit)
 	out := make([]AggregatedTool, 0, len(hits))
 	for _, hit := range hits {
-		tool := byExposed[hit.Exposed]
+		tool, known := byOrigin[origin{hit.Server, hit.Tool}]
+		if !known {
+			continue
+		}
 		tool.Score = hit.Score
 		out = append(out, tool)
 	}

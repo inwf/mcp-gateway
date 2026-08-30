@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { App, Button, Popconfirm, Skeleton, Switch, Table, Tabs, Tooltip } from 'antd';
+import { Button, Popconfirm, Skeleton, Switch, Table, Tabs, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   ArrowLeftOutlined,
@@ -18,6 +18,7 @@ import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
 import type { Resource, ServerView, Tool } from '@/api/types';
 import { useServerActions } from '@/hooks/use-server-actions';
+import { useExposure } from '@/hooks/use-exposure';
 import { IconButton } from '@/components/IconButton';
 import { Panel } from '@/components/Panel';
 import { StateBadge } from '@/components/StateBadge';
@@ -144,42 +145,6 @@ function OverviewTab({ server }: { server: ServerView }) {
   );
 }
 
-/**
- * Turning one tool's exposure on and off.
- *
- * The allow list lives in the server's configuration, so a change is a
- * configuration write — the same call the edit form makes. Writing the
- * whole list rather than a delta is what the endpoint takes, and it also
- * keeps two tabs from each dropping the other's change silently: the
- * second write is built from what was read, and the list is refetched
- * afterwards.
- *
- * There is no optimistic update. The gateway has to republish its tool
- * list before the exposed name exists, and inventing that name here would
- * be the second computation of it that this page just stopped doing.
- */
-function useExposure(server: ServerView) {
-  const queryClient = useQueryClient();
-  const { message } = App.useApp();
-  const { t } = useTranslation();
-
-  return useMutation({
-    mutationFn: ({ tool, on }: { tool: string; on: boolean }) => {
-      const current = server.config.exposedTools ?? [];
-      const next = on ? [...new Set([...current, tool])] : current.filter((name) => name !== tool);
-      return endpoints.updateServer(server.name, { ...server.config, exposedTools: next });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: keys.servers.all });
-      void queryClient.invalidateQueries({ queryKey: keys.tools.all });
-      void queryClient.invalidateQueries({ queryKey: keys.gateway.all });
-    },
-    onError: (error: unknown) => {
-      message.error(error instanceof Error ? error.message : t('error.unknown'));
-    },
-  });
-}
-
 function ToolsTab({ server }: { server: ServerView }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
@@ -193,7 +158,7 @@ function ToolsTab({ server }: { server: ServerView }) {
     enabled: connected,
   });
 
-  const expose = useExposure(server);
+  const expose = useExposure();
 
   if (!connected) {
     return <Nothing title={t('state.disconnected')} hint={t('tools.emptyHint')} />;
@@ -236,7 +201,9 @@ function ToolsTab({ server }: { server: ServerView }) {
               checked={Boolean(tool.exposed)}
               loading={expose.isPending && expose.variables?.tool === tool.name}
               disabled={expose.isPending}
-              onChange={(on) => expose.mutate({ tool: tool.name, on })}
+              onChange={(on) =>
+                expose.mutate({ server: server.name, config: server.config, tool: tool.name, on })
+              }
               aria-label={`${t('server.expose')} ${tool.name}`}
             />
           </div>

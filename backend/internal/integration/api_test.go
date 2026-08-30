@@ -177,6 +177,77 @@ func TestTheAPIAggregatesToolsAcrossServers(t *testing.T) {
 	}
 }
 
+// The management interface is where exposure is decided, so it has to be
+// able to see the tools that are not exposed. Listing only the exposed
+// ones leaves a fresh installation with nothing on the page and no way to
+// change that — the same fault as a management view that under-reports,
+// pointed the other way.
+func TestTheAPICanListEveryUpstreamToolIncludingUnexposedOnes(t *testing.T) {
+	stack := start(t, map[string]string{"files": "full"})
+	exposeOnly(t, stack, "files", "echo")
+
+	var exposedOnly struct {
+		Tools []api.AggregatedTool `json:"tools"`
+	}
+	stack.apiGet(t, "/api/tools?limit=100", &exposedOnly)
+
+	var everything struct {
+		Tools []api.AggregatedTool `json:"tools"`
+	}
+	stack.apiGet(t, "/api/tools?limit=100&all=true", &everything)
+
+	if len(everything.Tools) <= len(exposedOnly.Tools) {
+		t.Fatalf("all=true returned %d tools, exposed-only returned %d; "+
+			"the test server has tools it does not expose",
+			len(everything.Tools), len(exposedOnly.Tools))
+	}
+
+	// Each unexposed tool still says where it came from, and says it has no
+	// exposed name rather than borrowing one.
+	var unexposed int
+	for _, tool := range everything.Tools {
+		if tool.Exposed != "" {
+			continue
+		}
+		unexposed++
+		if tool.Server == "" || tool.Tool == "" {
+			t.Errorf("an unexposed tool does not say where it came from: %+v", tool)
+		}
+		if tool.InputSchema == nil {
+			t.Errorf("%s/%s carries no schema, so a call dialog cannot be built",
+				tool.Server, tool.Tool)
+		}
+	}
+	if unexposed == 0 {
+		t.Error("no tool came back unexposed, so nothing was added by all=true")
+	}
+}
+
+// Every unexposed tool has the same empty exposed name, so anything that
+// identifies a search result by that name keeps one of them and loses the
+// rest.
+func TestSearchingEveryToolKeepsTheUnexposedOnesApart(t *testing.T) {
+	stack := start(t, map[string]string{"files": "full"})
+	exposeOnly(t, stack, "files", "echo")
+
+	var got struct {
+		Tools []api.AggregatedTool `json:"tools"`
+	}
+	stack.apiGet(t, "/api/tools?all=true&limit=100&q=e", &got)
+
+	seen := map[string]bool{}
+	for _, tool := range got.Tools {
+		key := tool.Server + "/" + tool.Tool
+		if seen[key] {
+			t.Errorf("%q appears twice in the results", key)
+		}
+		seen[key] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("a search matching several tools returned %d: %+v", len(seen), got.Tools)
+	}
+}
+
 func TestSearchingAggregatedTools(t *testing.T) {
 	stack := start(t, map[string]string{"files": "full"})
 
@@ -258,6 +329,25 @@ func TestASearchAndATagFilterCompose(t *testing.T) {
 			t.Errorf("%q ignored the search term", tool.Exposed)
 		}
 	}
+}
+
+// exposeOnly narrows a server's allow list to the named tools.
+//
+// The test harness exposes everything each server offers, because most
+// tests are about forwarding. A test about the difference between exposed
+// and merely available has to create that difference.
+func exposeOnly(t *testing.T, stack *stack, server string, tools ...string) {
+	t.Helper()
+
+	if _, err := stack.Configs.Update(func(c *config.Config) error {
+		entry := c.MCPServers[server]
+		entry.ExposedTools = tools
+		c.MCPServers[server] = entry
+		return nil
+	}); err != nil {
+		t.Fatalf("narrow the allow list for %s: %v", server, err)
+	}
+	stack.Gateway.Sync()
 }
 
 // startTagged brings up two servers, only one of which carries tags.
