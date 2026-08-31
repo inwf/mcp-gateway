@@ -14,6 +14,7 @@ import (
 
 	"mcphub/internal/config"
 	"mcphub/internal/events"
+	"mcphub/internal/guide"
 )
 
 // Options configures a [Gateway].
@@ -324,6 +325,16 @@ func (g *Gateway) readResource(ctx context.Context, req *mcp.ReadResourceRequest
 	uri := ""
 	if req != nil && req.Params != nil {
 		uri = req.Params.URI
+	}
+
+	// The guide is the gateway's own document rather than anything to do
+	// with a server, so it is answered before the URI is taken apart.
+	if uri == GuideResourceURI {
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: uri, MIMEType: guide.MIMEType, Text: guide.Text()},
+			},
+		}, nil
 	}
 
 	server, upstreamURI, ok := ParseResourceURI(uri)

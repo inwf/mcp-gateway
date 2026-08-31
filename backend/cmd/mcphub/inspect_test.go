@@ -77,6 +77,32 @@ func TestToolsShowWorksForTheGatewaysOwnTools(t *testing.T) {
 	}
 }
 
+// Deciding whether to expose a tool means reading it first, so a tool
+// that is not exposed has to be describable. It is named the way the full
+// list names it.
+func TestToolsShowDescribesAnUnexposedTool(t *testing.T) {
+	address, cleanup := exposingOneTool(t)
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "show", "probe/sleep", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "not exposed") {
+		t.Errorf("the output does not say that it is not exposed:\n%s", stdout)
+	}
+	// The schema is the reason to look at all, and an unexposed tool has one
+	// like any other.
+	if !strings.Contains(stdout, "INPUT SCHEMA") {
+		t.Errorf("the input schema is missing:\n%s", stdout)
+	}
+	// And how to reach it, since its name is not in the gateway's tool list.
+	if !strings.Contains(stdout, gateway.ToolCallTool) {
+		t.Errorf("no way to call it is offered:\n%s", stdout)
+	}
+}
+
 func TestToolsShowRefusesAToolThatIsNotThere(t *testing.T) {
 	address, cleanup := withTestServer(t, "probe")
 	defer cleanup()

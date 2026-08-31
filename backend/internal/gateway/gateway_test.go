@@ -17,6 +17,7 @@ import (
 	"mcphub/internal/config"
 	"mcphub/internal/events"
 	"mcphub/internal/gateway"
+	"mcphub/internal/guide"
 	"mcphub/internal/upstream"
 )
 
@@ -609,6 +610,48 @@ func TestReadingAForwardedResource(t *testing.T) {
 	}
 	if len(result.Contents) == 0 || !strings.Contains(result.Contents[0].Text, "files") {
 		t.Errorf("contents = %+v, want the text from the upstream server", result.Contents)
+	}
+}
+
+// The guide is published so that a model can read how to use the gateway
+// without anyone pasting the document into its context. It matters most on
+// an installation where nothing is exposed yet, which is the default.
+func TestTheGuideIsPublishedAsAResource(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	listed, err := session.ListResources(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if !slices.ContainsFunc(listed.Resources, func(r *mcp.Resource) bool {
+		return r.URI == gateway.GuideResourceURI
+	}) {
+		t.Fatalf("%q is not listed: %v", gateway.GuideResourceURI, uris(listed.Resources))
+	}
+
+	result, err := session.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: gateway.GuideResourceURI,
+	})
+	if err != nil {
+		t.Fatalf("ReadResource: %v", err)
+	}
+	if len(result.Contents) != 1 {
+		t.Fatalf("the guide came back as %d parts, want one document", len(result.Contents))
+	}
+
+	// The same document the CLI prints, not a copy of it. Two embedded
+	// copies would start out identical and drift the first time one is
+	// edited, which is a failure nothing else would notice.
+	if got := result.Contents[0].Text; got != guide.Text() {
+		t.Errorf("the resource is not the shared document (%d bytes served, %d in the package)",
+			len(got), len(guide.Text()))
+	}
+	if got := result.Contents[0].MIMEType; got != guide.MIMEType {
+		t.Errorf("mime type = %q, want %q", got, guide.MIMEType)
 	}
 }
 

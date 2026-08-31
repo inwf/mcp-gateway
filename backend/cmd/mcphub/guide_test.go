@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"mcphub/internal/api"
 	"mcphub/internal/config"
 	"mcphub/internal/gateway"
+	"mcphub/internal/guide"
 )
 
 // A guide is worth testing not for its prose but for whether it is still
@@ -35,17 +37,51 @@ func TestGuideIsPrinted(t *testing.T) {
 	}
 }
 
+// The command and the gateway's hub://guide resource serve one document.
+// This pins the CLI half to the shared package; the gateway half is pinned
+// in internal/gateway. What both are there to stop is a second embedded
+// copy, which would read identically until the day one of them is edited.
+func TestTheGuideCommandPrintsTheSharedDocument(t *testing.T) {
+	code, stdout, stderr := execute(t, "guide")
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	if stdout != guide.Text() {
+		t.Errorf("the command printed %d bytes and the package holds %d; "+
+			"it is not printing the shared document", len(stdout), len(guide.Text()))
+	}
+}
+
 // Every command the guide tells someone to run has to exist.
 func TestGuideOnlyMentionsRealCommands(t *testing.T) {
 	root := newRootCommand(nil, nil, nil)
 
-	unknown, checked := checkCommandsIn(root, guide)
+	unknown, checked := checkCommandsIn(root, guide.Text())
 	if checked == 0 {
 		t.Fatal("no mcphub commands were found in the guide, so this proves nothing")
 	}
 	for _, bad := range unknown {
 		t.Errorf("the guide tells the reader to run %q, which is not a command; "+
 			"the commands are: %s", bad, strings.Join(sorted(commandPaths(root)), ", "))
+	}
+}
+
+// Every flag the guide tells someone to type has to exist on the command
+// it is typed after.
+//
+// A renamed flag is the quietest kind of documentation rot: the command
+// still runs, so nothing looks broken until a reader copies the line and
+// gets "unknown flag".
+func TestGuideOnlyMentionsRealFlags(t *testing.T) {
+	root := newRootCommand(nil, nil, nil)
+
+	unknown, checked := checkFlagsIn(root, guide.Text())
+	if checked == 0 {
+		t.Fatal("no flags were found in the guide, so this proves nothing")
+	}
+	for _, bad := range unknown {
+		t.Errorf("the guide tells the reader to type %q, which is not a flag there", bad)
 	}
 }
 
@@ -60,7 +96,7 @@ func TestGuideMentionsEveryCommand(t *testing.T) {
 		if skip[strings.Fields(path)[0]] {
 			continue
 		}
-		if !strings.Contains(guide, "mcphub "+path) {
+		if !strings.Contains(guide.Text(), "mcphub "+path) {
 			t.Errorf("the guide never mentions %q", "mcphub "+path)
 		}
 	}
@@ -70,7 +106,7 @@ func TestGuideMentionsEveryCommand(t *testing.T) {
 // renamed one that never reaches the guide is a real omission.
 func TestGuideDocumentsEverySystemTool(t *testing.T) {
 	for _, name := range gateway.SystemToolNames {
-		if !strings.Contains(guide, name) {
+		if !strings.Contains(guide.Text(), name) {
 			t.Errorf("the guide never mentions the system tool %q", name)
 		}
 	}
@@ -92,7 +128,7 @@ func TestGuideAgreesWithTheProgramsConstants(t *testing.T) {
 		{"the default port", strconv.Itoa(defaults.Listen.Port)},
 		{"the default host", defaults.Listen.Host},
 	} {
-		if !strings.Contains(guide, fact.value) {
+		if !strings.Contains(guide.Text(), fact.value) {
 			t.Errorf("the guide does not mention %s (%q), so it cannot be describing "+
 				"this build", fact.what, fact.value)
 		}
@@ -107,7 +143,7 @@ func TestGuideDescribesTheRealTransports(t *testing.T) {
 		config.TransportStdio,
 		config.TransportStreamableHTTP,
 	} {
-		if !strings.Contains(guide, string(transport)) {
+		if !strings.Contains(guide.Text(), string(transport)) {
 			t.Errorf("the guide never mentions the %q transport", transport)
 		}
 	}
@@ -125,7 +161,7 @@ func TestGuideCanPrintOneSection(t *testing.T) {
 	if strings.Count(stdout, "\n## ") != 0 {
 		t.Errorf("more than one section was printed:\n%s", stdout)
 	}
-	if len(stdout) >= len(guide) {
+	if len(stdout) >= len(guide.Text()) {
 		t.Error("the whole guide was printed instead of one section")
 	}
 }
@@ -194,6 +230,62 @@ func checkCommandsIn(root *cobra.Command, document string) (unknown []string, ch
 		}
 	}
 	return unknown, checked
+}
+
+// checkFlagsIn walks every "mcphub ..." line of the guide and reports the
+// --flags that the command on that line does not have.
+//
+// The command is resolved the same way checkCommandsIn resolves it, so a
+// flag is judged against the command it was written after rather than
+// against the whole program: --verbose exists, but not on `tools list`.
+func checkFlagsIn(root *cobra.Command, document string) (unknown []string, checked int) {
+	for _, line := range strings.Split(document, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "mcphub ")
+		if !ok {
+			continue
+		}
+
+		cmd := root
+		var path []string
+		for _, word := range strings.Fields(rest) {
+			// The guide shows optional arguments in brackets and quotes some
+			// values, neither of which is part of what a user types.
+			word = strings.Trim(word, "[]`\"")
+
+			// A bare "--" ends mcphub's own arguments: what follows is the
+			// upstream command line, whose flags belong to that program.
+			if word == "--" {
+				break
+			}
+
+			if name, isFlag := strings.CutPrefix(word, "--"); isFlag {
+				name, _, _ = strings.Cut(name, "=")
+				checked++
+				if lookupFlag(cmd, name) == nil {
+					unknown = append(unknown,
+						strings.TrimSpace("mcphub "+strings.Join(path, " ")+" --"+name))
+				}
+				continue
+			}
+			if !cmd.HasSubCommands() || !isCommandWord(word) {
+				continue
+			}
+			if child := childNamed(cmd, word); child != nil {
+				cmd = child
+				path = append(path, word)
+			}
+		}
+	}
+	return unknown, checked
+}
+
+func lookupFlag(cmd *cobra.Command, name string) *pflag.Flag {
+	if flag := cmd.Flags().Lookup(name); flag != nil {
+		return flag
+	}
+	// The shared flags are declared once on the root, so a subcommand only
+	// sees them as inherited ones.
+	return cmd.InheritedFlags().Lookup(name)
 }
 
 func childNamed(cmd *cobra.Command, name string) *cobra.Command {

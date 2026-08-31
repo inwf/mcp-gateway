@@ -31,18 +31,8 @@ func withTestServer(t *testing.T, name string) (address string, cleanup func()) 
 // is a small part of what exists. Presenting it as the whole would send
 // someone looking for a tool that is there all along.
 func TestToolsListSaysWhatItLeftOut(t *testing.T) {
-	base, stop, done := running(t, func(cfg *config.Config) {
-		upstream, err := testmcp.ServerConfig(testmcp.ModeFull)
-		if err != nil {
-			t.Fatalf("build the upstream configuration: %v", err)
-		}
-		upstream.ExposedTools = []string{"echo"}
-		cfg.MCPServers = map[string]config.MCPServer{"probe": upstream}
-	})
-	defer func() { stop(); <-done }()
-
-	address := hostPort(t, base)
-	waitForState(t, address, "probe", "connected")
+	address, cleanup := exposingOneTool(t)
+	defer cleanup()
 
 	code, stdout, stderr := execute(t, "tools", "list", "--address", address)
 	if code != exitOK {
@@ -59,6 +49,112 @@ func TestToolsListSaysWhatItLeftOut(t *testing.T) {
 	if !strings.Contains(stdout, "call_tool") {
 		t.Errorf("no way out is offered:\n%s", stdout)
 	}
+	// And where to see what they are, which is a different question from
+	// how to call one.
+	if !strings.Contains(stdout, "tools list --all") {
+		t.Errorf("the command that lists them is not named:\n%s", stdout)
+	}
+}
+
+// The list that decides what to expose has to show what there is to
+// choose from. Without this the CLI could report a count of hidden tools
+// and offer no way at all to find out what they were.
+func TestToolsListAllShowsTheUnexposedOnes(t *testing.T) {
+	address, cleanup := exposingOneTool(t)
+	defer cleanup()
+
+	code, stdout, stderr := execute(t, "tools", "list", "--all", "--address", address)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+
+	// Every tool the server has, whether or not it is on offer. "grown" is
+	// not among them: that one only exists after "grow" has been called.
+	for _, name := range []string{"echo", "sleep", "grow", "fail"} {
+		if !strings.Contains(stdout, name) {
+			t.Errorf("%q is missing from the full list:\n%s", name, stdout)
+		}
+	}
+
+	// The exposed one carries the name a client would call it by, and the
+	// rest say plainly that they have none.
+	if row := rowFor(t, stdout, "echo"); !strings.Contains(row, "probe_echo") {
+		t.Errorf("the exposed name is missing from the row: %q", row)
+	}
+	if row := rowFor(t, stdout, "sleep"); !strings.Contains(row, "-") {
+		t.Errorf("an unexposed tool does not say so: %q", row)
+	}
+}
+
+// A dash in a column reads as missing data unless something says what it
+// means, and what it means here is a decision someone can reverse.
+func TestToolsListAllExplainsWhatIsNotExposed(t *testing.T) {
+	address, cleanup := exposingOneTool(t)
+	defer cleanup()
+
+	_, stdout, _ := execute(t, "tools", "list", "--all", "--address", address)
+
+	if !strings.Contains(stdout, "not exposed") {
+		t.Errorf("nothing explains the dashes:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "call_tool") {
+		t.Errorf("no way to reach them is offered:\n%s", stdout)
+	}
+	// The count of hidden tools belongs to the exposed-only list; here they
+	// are all on screen, so repeating "N more are not listed" would be false.
+	if strings.Contains(stdout, "not in the list above") {
+		t.Errorf("the full list claims to have left something out:\n%s", stdout)
+	}
+}
+
+// The two flags answer different questions and have to compose.
+func TestToolsListAllStillNarrowsToOneServer(t *testing.T) {
+	base, stop, done := running(t, func(cfg *config.Config) {
+		server, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		server.ExposedTools = nil
+		cfg.MCPServers = map[string]config.MCPServer{"one": server, "two": server}
+	})
+	defer func() { stop(); <-done }()
+
+	address := hostPort(t, base)
+	waitForState(t, address, "one", "connected")
+	waitForState(t, address, "two", "connected")
+
+	code, stdout, stderr := execute(t, "tools", "list", "--all",
+		"--server", "one", "--address", address)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+
+	if !strings.Contains(stdout, "one") {
+		t.Errorf("the server that was asked for is missing:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "two") {
+		t.Errorf("a tool from another server survived the filter:\n%s", stdout)
+	}
+}
+
+// exposingOneTool starts a gateway whose only server offers everything and
+// exposes one thing, which is the ordinary state of an installation someone
+// has begun to configure.
+func exposingOneTool(t *testing.T) (address string, cleanup func()) {
+	t.Helper()
+
+	base, stop, done := running(t, func(cfg *config.Config) {
+		server, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		server.ExposedTools = []string{"echo"}
+		cfg.MCPServers = map[string]config.MCPServer{"probe": server}
+	})
+
+	address = hostPort(t, base)
+	waitForState(t, address, "probe", "connected")
+	return address, func() { stop(); <-done }
 }
 
 // With everything exposed there is nothing left out, and a note saying so
@@ -156,6 +252,65 @@ func TestToolsCallAcceptsTheBareToolName(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "bare") {
 		t.Errorf("the tool's answer is missing:\n%s", stdout)
+	}
+}
+
+// Exposure decides what a client is offered, not what exists. This is the
+// CLI's half of that: a tool nothing has exposed is still callable, which
+// is what makes "expose nothing by default" a sane default rather than a
+// wall.
+func TestToolsCallReachesAnUnexposedTool(t *testing.T) {
+	base, stop, done := running(t, func(cfg *config.Config) {
+		server, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		server.ExposedTools = nil
+		cfg.MCPServers = map[string]config.MCPServer{"probe": server}
+	})
+	defer func() { stop(); <-done }()
+
+	address := hostPort(t, base)
+	waitForState(t, address, "probe", "connected")
+
+	code, stdout, stderr := execute(t, "tools", "call", "probe/echo",
+		"--arg", "message=through the back door", "--address", address)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "through the back door") {
+		t.Errorf("the tool's answer is missing:\n%s", stdout)
+	}
+}
+
+// A suggestion has to be something that can be typed back in. An unexposed
+// tool has no exposed name, so listing those names would offer blanks.
+func TestToolsCallNamesTheAmbiguousCandidatesUsably(t *testing.T) {
+	base, stop, done := running(t, func(cfg *config.Config) {
+		server, err := testmcp.ServerConfig(testmcp.ModeFull)
+		if err != nil {
+			t.Fatalf("build the upstream configuration: %v", err)
+		}
+		server.ExposedTools = nil
+		cfg.MCPServers = map[string]config.MCPServer{"one": server, "two": server}
+	})
+	defer func() { stop(); <-done }()
+
+	address := hostPort(t, base)
+	waitForState(t, address, "one", "connected")
+	waitForState(t, address, "two", "connected")
+
+	code, _, stderr := execute(t, "tools", "call", "echo",
+		"--arg", "message=x", "--address", address)
+
+	if code != exitFailure {
+		t.Errorf("exit code = %d, want %d", code, exitFailure)
+	}
+	for _, want := range []string{"one/echo", "two/echo"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the message does not offer %q:\n%s", want, stderr)
+		}
 	}
 }
 

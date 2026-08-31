@@ -126,8 +126,17 @@ func newToolsCommand(global *globalOptions, stdout io.Writer) *cobra.Command {
 
 // ===== tools list =====
 
+// listOptions is what `tools list` was asked for.
+type listOptions struct {
+	server string
+	search string
+
+	// all asks for every upstream tool rather than the ones on offer.
+	all bool
+}
+
 func newToolsListCommand(client *clientOptions, stdout io.Writer) *cobra.Command {
-	var server, search string
+	var opts listOptions
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -136,23 +145,29 @@ func newToolsListCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 			"sees them by. A tool a server has but the configuration does not expose\n" +
 			"is not listed, because it is not on offer.\n\n" +
 			"The gateway's own tools are listed first, apart from the forwarded ones:\n" +
-			"they belong to no server, and they are how a model finds everything else.",
+			"they belong to no server, and they are how a model finds everything else.\n\n" +
+			"--all lists every tool every server has, exposed or not, with the name\n" +
+			"each is exposed under. Nothing is exposed unless the configuration asks\n" +
+			"for it, so on an ordinary installation that is a much longer list — and\n" +
+			"it is the one to read when deciding what to expose.",
 		Args: noPositionalArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			gateway, err := client.connect()
 			if err != nil {
 				return err
 			}
-			tools, err := fetchTools(cmd.Context(), gateway, search)
+			tools, err := fetchTools(cmd.Context(), gateway, opts.search, opts.all)
 			if err != nil {
 				return err
 			}
-			return printTools(stdout, tools, server, search)
+			return printTools(stdout, tools, opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&server, "server", "", "only tools from this server")
-	cmd.Flags().StringVar(&search, "search", "", "rank the tools by how well they match these words")
+	cmd.Flags().StringVar(&opts.server, "server", "", "only tools from this server")
+	cmd.Flags().StringVar(&opts.search, "search", "", "rank the tools by how well they match these words")
+	cmd.Flags().BoolVar(&opts.all, "all", false,
+		"list every upstream tool, including the ones that are not exposed")
 	return cmd
 }
 
@@ -163,11 +178,14 @@ func newToolsListCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 // Two calls, because the two kinds of tool are genuinely different
 // things: a forwarded tool has a server, a name on that server and a name
 // it is exposed under, and the gateway's own has none of those.
-func fetchTools(ctx context.Context, gateway *gatewayClient, search string) (toolSet, error) {
+func fetchTools(ctx context.Context, gateway *gatewayClient, search string, all bool) (toolSet, error) {
 	query := url.Values{}
 	query.Set("limit", strconv.Itoa(listLimit))
 	if search != "" {
 		query.Set("q", search)
+	}
+	if all {
+		query.Set("all", "true")
 	}
 
 	var forwarded toolListResponse
@@ -180,9 +198,14 @@ func fetchTools(ctx context.Context, gateway *gatewayClient, search string) (too
 		return toolSet{}, err
 	}
 
-	unexposed, err := fetchUnexposedCounts(ctx, gateway)
-	if err != nil {
-		return toolSet{}, err
+	// Nothing was left out of a list that asked for everything, so there is
+	// no count of omissions to fetch.
+	unexposed := map[string]int{}
+	if !all {
+		unexposed, err = fetchUnexposedCounts(ctx, gateway)
+		if err != nil {
+			return toolSet{}, err
+		}
 	}
 
 	return toolSet{system: system, upstream: forwarded.Tools, unexposed: unexposed}, nil
@@ -262,14 +285,14 @@ func rankTools(search string, tools []aggregatedTool) []aggregatedTool {
 	return out
 }
 
-func printTools(stdout io.Writer, tools toolSet, server, search string) error {
+func printTools(stdout io.Writer, tools toolSet, opts listOptions) error {
 	// A server filter is a question about one server, and the gateway's
 	// own tools are not on any server — so they are not an answer to it.
-	if server != "" {
+	if opts.server != "" {
 		tools.system = nil
 		kept := tools.upstream[:0]
 		for _, tool := range tools.upstream {
-			if tool.Server == server {
+			if tool.Server == opts.server {
 				kept = append(kept, tool)
 			}
 		}
@@ -277,8 +300,8 @@ func printTools(stdout io.Writer, tools toolSet, server, search string) error {
 	}
 
 	if tools.empty() {
-		fmt.Fprintln(stdout, nothingToShow(server, search))
-		printHidden(stdout, tools.hidden(server))
+		fmt.Fprintln(stdout, nothingToShow(opts.server, opts.search))
+		printHidden(stdout, tools.hidden(opts.server))
 		return nil
 	}
 
@@ -296,35 +319,68 @@ func printTools(stdout io.Writer, tools toolSet, server, search string) error {
 			fmt.Fprintln(stdout)
 		}
 		fmt.Fprintf(stdout, "SERVER TOOLS (%d)\n", len(tools.upstream))
-		rows := newTable(stdout, "NAME", "SERVER", "DESCRIPTION")
-		for _, tool := range tools.upstream {
-			rows.row(tool.Exposed, tool.Server, summarise(tool.Description))
+		if opts.all {
+			printEveryServerTool(stdout, tools.upstream)
+		} else {
+			rows := newTable(stdout, "NAME", "SERVER", "DESCRIPTION")
+			for _, tool := range tools.upstream {
+				rows.row(tool.Exposed, tool.Server, summarise(tool.Description))
+			}
+			rows.flush()
 		}
-		rows.flush()
 	}
 
 	if len(tools.upstream) == listLimit {
 		fmt.Fprintf(stdout, "\nstopped at %d tools; there may be more\n", listLimit)
 	}
-	printHidden(stdout, tools.hidden(server))
+	printHidden(stdout, tools.hidden(opts.server))
 	return nil
+}
+
+// printEveryServerTool lists the tools under their names on their own
+// servers, with the name each is exposed under beside it.
+//
+// The upstream name leads because it is the only one every row has: a tool
+// that is not exposed has no exposed name, and a table keyed on a column
+// that is blank half the time cannot be read down. The blank is a dash,
+// and what a dash means is said underneath — an unexplained one reads as
+// missing data rather than as a decision someone made.
+func printEveryServerTool(stdout io.Writer, tools []aggregatedTool) {
+	rows := newTable(stdout, "TOOL", "SERVER", "EXPOSED AS", "DESCRIPTION")
+	unexposed := 0
+	for _, tool := range tools {
+		if tool.Exposed == "" {
+			unexposed++
+		}
+		rows.row(tool.Tool, tool.Server, dash(tool.Exposed), summarise(tool.Description))
+	}
+	rows.flush()
+
+	if unexposed == 0 {
+		return
+	}
+	fmt.Fprintf(stdout,
+		"\n%d of these %s not exposed, so %s not in the gateway's tool list.\n"+
+			"Reach one with the %s gateway tool, or expose it in the web interface.\n",
+		unexposed, plural(unexposed, "tool is", "tools are"),
+		plural(unexposed, "it is", "they are"), gateway.ToolCallTool)
 }
 
 // printHidden says how much was left out, so the table above is not read
 // as the whole of what is available.
 //
-// It does not point at a command that lists the hidden tools, because
-// there is not one: `tools list --server` narrows this same exposed set.
-// Saying only what is true is the point — the count plus the way to reach
-// them is more use than a suggestion that leads nowhere.
+// It names the command that shows them, which it could not do until that
+// command existed: `tools list --server` narrows this same exposed set, and
+// pointing at it was worse than pointing at nothing.
 func printHidden(stdout io.Writer, hidden int) {
 	if hidden == 0 {
 		return
 	}
 	fmt.Fprintf(stdout,
 		"\n%d more upstream %s not exposed, and so not in the list above.\n"+
-			"Nothing is exposed unless the configuration asks for it; reach the rest\n"+
-			"through the %s gateway tool, or expose them in the web interface.\n",
+			"Nothing is exposed unless the configuration asks for it. See them with\n"+
+			"\"mcphub tools list --all\"; reach one through the %s gateway tool, or\n"+
+			"expose it in the web interface.\n",
 		hidden, plural(hidden, "tool is", "tools are"), gateway.ToolCallTool)
 }
 
@@ -388,14 +444,19 @@ func newToolsShowCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 			"the arguments it declares.\n\n" +
 			"`tools list` shortens each description to one line so that the list\n" +
 			"stays a list. This is where the full text lives, and the only place\n" +
-			"the input schema is shown — which is what you need to build a call.",
+			"the input schema is shown — which is what you need to build a call.\n\n" +
+			"A tool that is not exposed can be shown too: it is named as\n" +
+			"\"server/tool\", the way `tools list --all` lists it.",
 		Args: exactlyOneArg("tool"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := client.connect()
 			if err != nil {
 				return err
 			}
-			tools, err := fetchTools(cmd.Context(), gateway, "")
+			// Every tool, not just the exposed ones. Inspecting a tool is how
+			// someone decides whether to expose it, so refusing to describe an
+			// unexposed one would refuse the question being asked.
+			tools, err := fetchTools(cmd.Context(), gateway, "", true)
 			if err != nil {
 				return err
 			}
@@ -426,18 +487,19 @@ func showTool(stdout io.Writer, tool aggregatedTool, asJSON bool) error {
 	}
 
 	facts := newTable(stdout)
-	facts.row("name", tool.Exposed)
 	if tool.system {
+		facts.row("name", tool.Exposed)
 		// A gateway tool is not forwarded from anywhere, and saying "-"
 		// under a SERVER heading would leave a reader wondering which one.
 		facts.row("origin", "the gateway itself")
 	} else {
+		// Both names, always. The gateway prefixes and renames on a
+		// collision, so the name on the server is what that server's own
+		// documentation talks about — and a tool that is not exposed has only
+		// that one, which is the case the pair has to cover.
 		facts.row("server", tool.Server)
-		if tool.Tool != tool.Exposed {
-			// The gateway prefixes, and renames on a collision. The name on
-			// the server is what its own documentation talks about.
-			facts.row("name on the server", tool.Tool)
-		}
+		facts.row("name on the server", tool.Tool)
+		facts.row("exposed as", exposedAs(tool))
 	}
 	facts.flush()
 
@@ -511,6 +573,9 @@ func newToolsCallCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 			"such as \"files_read\". A bare tool name is accepted too when only one\n" +
 			"server offers it. The gateway's own tools, such as \"list_servers\", are\n" +
 			"called by their own names.\n\n" +
+			"A tool that is not exposed can be called as \"server/tool\". Exposure\n" +
+			"decides what a client is offered, not what exists: this command talks to\n" +
+			"the server directly, exactly as the call_tool gateway tool does.\n\n" +
 			"Arguments can be given as one JSON object with --args, as repeated\n" +
 			"--arg key=value pairs, or both; a pair overrides the same key in the\n" +
 			"JSON. A pair's value is converted using the type the tool's schema\n" +
@@ -523,7 +588,7 @@ func newToolsCallCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 				return err
 			}
 
-			tools, err := fetchTools(cmd.Context(), gateway, "")
+			tools, err := fetchTools(cmd.Context(), gateway, "", true)
 			if err != nil {
 				return err
 			}
@@ -552,15 +617,22 @@ func newToolsCallCommand(client *clientOptions, stdout io.Writer) *cobra.Command
 // resolveTool finds the tool the user meant.
 //
 // The exposed name is what a client sees and is always unambiguous, so it
-// wins. A bare tool name is accepted as a convenience when exactly one
-// server offers it; when several do, refusing and naming them is the only
-// safe answer, because picking one would silently call the wrong server.
+// wins. "server/tool" is next, and is the only handle an unexposed tool
+// has — it is how `tools list --all` names one. A bare tool name is
+// accepted as a convenience when exactly one server offers it; when
+// several do, refusing and naming them is the only safe answer, because
+// picking one would silently call the wrong server.
 func resolveTool(tools toolSet, name string) (aggregatedTool, error) {
 	candidates := tools.all()
 
 	var bare []aggregatedTool
 	for _, tool := range candidates {
-		if tool.Exposed == name {
+		// An unexposed tool has no exposed name, so the empty string must not
+		// match one: it would make every one of them a candidate at once.
+		if tool.Exposed != "" && tool.Exposed == name {
+			return tool, nil
+		}
+		if !tool.system && name == tool.Server+"/"+tool.Tool {
 			return tool, nil
 		}
 		if tool.Tool == name {
@@ -577,12 +649,37 @@ func resolveTool(tools toolSet, name string) (aggregatedTool, error) {
 	default:
 		names := make([]string, len(bare))
 		for i, tool := range bare {
-			names[i] = tool.Exposed
+			names[i] = handle(tool)
 		}
 		return aggregatedTool{}, fmt.Errorf(
 			"%q is offered by more than one server; use one of: %s",
 			name, strings.Join(names, ", "))
 	}
+}
+
+// handle names a tool the way it can be typed back in.
+//
+// The exposed name when there is one, and "server/tool" otherwise. A
+// suggestion has to be something that works: printing the empty exposed
+// name of an unexposed tool would offer the reader a blank to type.
+func handle(tool aggregatedTool) string {
+	if tool.Exposed != "" {
+		return tool.Exposed
+	}
+	if tool.Server != "" {
+		return tool.Server + "/" + tool.Tool
+	}
+	return tool.Tool
+}
+
+// exposedAs renders the name a client would call the tool by, saying what
+// the absence of one means rather than printing a bare dash.
+func exposedAs(tool aggregatedTool) string {
+	if tool.Exposed != "" {
+		return tool.Exposed
+	}
+	return fmt.Sprintf("- (not exposed; call it with %s, or expose it in the web interface)",
+		gateway.ToolCallTool)
 }
 
 // suggest offers the names that contain what was typed, which covers the
@@ -591,12 +688,12 @@ func suggest(tools []aggregatedTool, name string) string {
 	var near []string
 	lower := strings.ToLower(name)
 	for _, tool := range tools {
-		if strings.Contains(strings.ToLower(tool.Exposed), lower) {
-			near = append(near, tool.Exposed)
+		if strings.Contains(strings.ToLower(handle(tool)), lower) {
+			near = append(near, handle(tool))
 		}
 	}
 	if len(near) == 0 {
-		return "; run \"mcphub tools list\" to see what is"
+		return "; run \"mcphub tools list --all\" to see what is"
 	}
 	if len(near) > 5 {
 		near = near[:5]

@@ -85,7 +85,7 @@ func TestBuildResourcesDescribesEveryServer(t *testing.T) {
 		{Name: "web", State: upstream.StateFailed},
 	}
 
-	got := gateway.BuildResources(statuses, nil)
+	got := besidesTheGuide(t, gateway.BuildResources(statuses, nil))
 
 	if len(got) != 2 {
 		t.Fatalf("built %d resources, want one per server", len(got))
@@ -122,7 +122,7 @@ func TestBuildResourcesForwardsUpstreamResources(t *testing.T) {
 		},
 	}
 
-	got := gateway.BuildResources(statuses, resources)
+	got := besidesTheGuide(t, gateway.BuildResources(statuses, resources))
 
 	if len(got) != 3 {
 		t.Fatalf("built %d resources, want 1 server plus 2 forwarded", len(got))
@@ -156,7 +156,7 @@ func TestBuildResourcesNamesTheSourceServer(t *testing.T) {
 		"blank": {{URI: "file:///b", Name: "b"}},
 	}
 
-	got := gateway.BuildResources(nil, resources)
+	got := besidesTheGuide(t, gateway.BuildResources(nil, resources))
 
 	for _, resource := range got {
 		server, _, ok := gateway.ParseResourceURI(resource.URI)
@@ -193,17 +193,43 @@ func TestBuildResourcesSkipsMalformedEntries(t *testing.T) {
 		"files": {nil, {URI: ""}, {URI: "file:///real"}},
 	}
 
-	got := gateway.BuildResources(nil, resources)
+	got := besidesTheGuide(t, gateway.BuildResources(nil, resources))
 
 	if len(got) != 1 {
 		t.Fatalf("built %d resources, want only the valid one", len(got))
 	}
 }
 
+// With no servers and no upstream resources there is still the guide: it
+// describes the gateway rather than anything connected to it, so an empty
+// installation is exactly when a client most needs to be able to read it.
 func TestBuildResourcesOfNothing(t *testing.T) {
-	if got := gateway.BuildResources(nil, nil); len(got) != 0 {
-		t.Errorf("built %v, want nothing", uris(got))
+	got := gateway.BuildResources(nil, nil)
+
+	if len(got) != 1 || got[0].URI != gateway.GuideResourceURI {
+		t.Errorf("built %v, want just the guide", uris(got))
 	}
+}
+
+// The guide is served under the gateway's own scheme but is not about a
+// server, so it does not parse as one. Every test that walks the built set
+// as though each entry named a server goes through here.
+func besidesTheGuide(t *testing.T, resources []*mcp.Resource) []*mcp.Resource {
+	t.Helper()
+
+	kept := make([]*mcp.Resource, 0, len(resources))
+	found := false
+	for _, resource := range resources {
+		if resource.URI == gateway.GuideResourceURI {
+			found = true
+			continue
+		}
+		kept = append(kept, resource)
+	}
+	if !found {
+		t.Fatalf("the guide is missing from %v", uris(resources))
+	}
+	return kept
 }
 
 func uris(resources []*mcp.Resource) []string {

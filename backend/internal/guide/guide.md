@@ -62,6 +62,21 @@ claude mcp add --transport http mcphub http://127.0.0.1:7788/mcp
 上游服务器的工具会以 `服务器名_工具名` 的形式暴露出来（例如 `files_read`），
 所以两台服务器各有一个 `read` 也不会撞名。
 
+**但默认一个上游工具都不暴露。** 客户端一开始只看到网关自己的七个系统工具，
+上游工具要在配置里逐个点名（`mcpServers.<名字>.exposedTools`，Web 界面的工具页
+每个工具有一个开关）才会进入 `tools/list`。
+
+这是有意的：上游的 schema 很占地方，一台服务器十几个工具、每个十几个参数，
+全塞进每个客户端的上下文就是纯浪费。**没暴露不等于用不了**——模型可以用
+`search_tools` 找、`get_tool` 取 schema、`call_tool` 调，需要时才付这份 token。
+把常用的几个暴露出来、其余留给按需检索，是这个网关想要的用法。
+
+想看有哪些还没暴露：
+
+```
+mcphub tools list --all
+```
+
 ## 添加上游服务器
 
 上游只有两种，对应配置里 `transport` 的两个取值：
@@ -123,8 +138,8 @@ mcphub servers list
 | `update_server_description`  | 改写某台服务器的描述                        |
 
 典型用法是三步：`search_tools` 找到候选 → `get_tool` 取 schema →
-`call_tool` 调用。工具本身也是直接暴露的，所以知道名字时直接调
-`files_read` 就行，不必绕 `call_tool`。
+`call_tool` 调用。已经暴露出来的工具可以直接按 `files_read` 这样的名字调，
+不必绕 `call_tool`；没暴露的就走这三步，`call_tool` 对两者都管用。
 
 这七个工具在 CLI 和 Web 界面里都单独成组，也可以直接调用：
 
@@ -175,8 +190,10 @@ mcphub config validate [file]       离线检查配置，一次报出全部问�
 
 mcphub servers list [--verbose]     列出服务器与各自状态
 mcphub servers add <name> ...       添加服务器
+mcphub status                       运行中实例的概况：连上了几台、在提供什么、谁连着
 
 mcphub tools list [--search 词]     列出/搜索网关提供的工具
+mcphub tools list --all             连没暴露的一起列，并标出各自的对外名字
 mcphub tools show <工具>            看一个工具的完整说明与输入 schema
 mcphub tools call <工具> --arg k=v  调用一个工具
 
@@ -187,6 +204,7 @@ mcphub guide                        输出本文档
 mcphub version                      输出版本
 ```
 
-以 `servers`、`tools`、`tags` 开头的命令，以及 `mcphub ui`，都是**运行中实例
-的客户端**——它们通过管理 API 询问那个实例，因为只有它知道自己实际连上了哪些
-上游。默认从配置里的 `listen` 取地址，也可以用 `--address host:port` 指定。
+以 `servers`、`tools`、`tags` 开头的命令，以及 `mcphub status` 与 `mcphub ui`，
+都是**运行中实例的客户端**——它们通过管理 API 询问那个实例，因为只有它知道自己
+实际连上了哪些上游。默认从配置里的 `listen` 取地址，也可以用
+`--address host:port` 指定。

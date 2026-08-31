@@ -94,6 +94,7 @@ func newRootCommand(stdout, stderr io.Writer, web fs.FS) *cobra.Command {
 		newConfigCommand(&global, stdout),
 		newGuideCommand(stdout),
 		newServersCommand(&global, stdout),
+		newStatusCommand(&global, stdout),
 		newTagsCommand(&global, stdout),
 		newToolsCommand(&global, stdout),
 		newUICommand(&global, stdout, openInBrowser()),

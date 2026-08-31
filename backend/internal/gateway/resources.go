@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcphub/internal/guide"
 	"mcphub/internal/upstream"
 )
 
@@ -16,6 +17,28 @@ import (
 // keeps gateway resources distinguishable from the upstream ones they
 // stand for.
 const resourcePrefix = "hub://servers/"
+
+// GuideResourceURI is the usage guide, served so that a model can read how
+// to use this gateway without anyone pasting the text into its context.
+//
+// It is spelled "guide" rather than "use-guide" to match the CLI command
+// that prints the same document. A URI naming something that appears
+// nowhere in the interface would be a third name for one thing.
+const GuideResourceURI = "hub://guide"
+
+// guideResource describes the guide. It is always present: it depends on
+// nothing outside the binary, and a client that can reach the gateway at
+// all can read it.
+func guideResource() *mcp.Resource {
+	return &mcp.Resource{
+		URI:      GuideResourceURI,
+		Name:     "guide",
+		Title:    "mcphub usage guide",
+		MIMEType: guide.MIMEType,
+		Description: "How to use this gateway: what its own tools are for, how upstream " +
+			"tools are named, and how to reach a tool that is not in tools/list.",
+	}
+}
 
 // ServerResourceURI names the resource describing one upstream server.
 func ServerResourceURI(server string) string {
@@ -59,13 +82,15 @@ func ParseResourceURI(uri string) (server, upstreamURI string, ok bool) {
 
 // BuildResources lists everything the gateway exposes as a resource.
 //
-// There are two kinds. Each server gets one resource describing it,
-// which is what makes the set of servers discoverable through the
-// protocol rather than only through the web API. Each upstream resource
-// then gets one standing in for it, so a client can read it without
-// knowing which server it lives on.
+// There are three kinds. The guide is always there, because it explains
+// the rest. Each server then gets one resource describing it, which is
+// what makes the set of servers discoverable through the protocol rather
+// than only through the web API. Each upstream resource finally gets one
+// standing in for it, so a client can read it without knowing which server
+// it lives on.
 func BuildResources(statuses []upstream.Status, resources map[string][]*mcp.Resource) []*mcp.Resource {
-	out := make([]*mcp.Resource, 0, len(statuses))
+	out := make([]*mcp.Resource, 0, len(statuses)+1)
+	out = append(out, guideResource())
 
 	for _, status := range statuses {
 		out = append(out, &mcp.Resource{
