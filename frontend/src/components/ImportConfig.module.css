@@ -1,0 +1,105 @@
+.body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+/* Choosing a file and pasting are the same act with two starting points,
+   so the picker sits directly above the text it fills in. */
+.pick {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.file {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.file::file-selector-button {
+  margin-right: var(--space-3);
+  padding: 4px var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel-a);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.file::file-selector-button:hover {
+  border-color: var(--line-accent);
+}
+
+.editor {
+  display: block;
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.editor:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.editor::placeholder {
+  color: var(--ink-faint);
+}
+
+.invalid {
+  display: block;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* One rejected setting per line: a dotted path and the sentence that says
+   what is wrong with it. The path is what makes it findable in the
+   document, which is why it leads. */
+.fields {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fields li {
+  display: grid;
+  gap: 2px;
+}
+
+.field {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+.reason {
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

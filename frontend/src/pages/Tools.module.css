@@ -11,6 +11,13 @@
   align-items: center;
 }
 
+/* Pushes the layout toggle to the far end of the filter bar: it changes
+   how the page looks rather than what it shows, so it does not belong
+   beside the controls that narrow the list. */
+.spacer {
+  flex: 1;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
@@ -131,4 +138,86 @@
   font-size: var(--text-sm);
   color: var(--warn);
   text-align: center;
+}
+
+/* ===== the list layout ===== */
+
+/* One tool per row, for the installation where a server offers forty of
+   them and cards have become a wall to scroll. */
+.list {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.1fr) minmax(6rem, 0.7fr) minmax(0, 2fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  transition: background var(--fast) var(--ease);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background: var(--panel-a);
+}
+
+/* Not exposed. The card layout says this with a dashed border; a row has
+   no border of its own to dash, so the name is what fades. */
+.rowOff .rowName {
+  color: var(--ink-muted);
+}
+
+.rowName {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.rowOrigin {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One line. Someone in this layout is looking for a tool rather than
+   reading about one, and a wrapped paragraph per row would put the rows
+   back where the cards were. */
+.rowDescription {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: end;
+}
+
+/* Below the width where four columns can each hold something, the row
+   becomes two lines rather than four unreadable slivers. */
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .rowOrigin,
+  .rowDescription {
+    display: none;
+  }
 }

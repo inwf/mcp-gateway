@@ -11,6 +11,7 @@ import { Panel } from '@/components/Panel';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { StringListEditor } from '@/components/KeyValueEditor';
 import { ExportConfig } from '@/components/ExportConfig';
+import { ImportConfig } from '@/components/ImportConfig';
 import { cx } from '@/lib/cx';
 import styles from './Settings.module.css';
 
@@ -416,6 +417,7 @@ export default function Settings() {
         <span className="label">{t('settings.path')}</span>
         <span className={styles.pathValue}>{config.data.path}</span>
         <span className={styles.pathSpacer} />
+        <ImportConfig />
         <ExportConfig />
       </div>
 

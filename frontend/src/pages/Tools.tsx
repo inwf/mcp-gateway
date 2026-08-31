@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Select, Skeleton, Switch, Tooltip } from 'antd';
+import { Button, Input, Segmented, Select, Skeleton, Switch, Tooltip } from 'antd';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
@@ -13,6 +13,7 @@ import { Nothing } from '@/components/Nothing';
 import { Reveal } from '@/components/Reveal';
 import { ToolCallDialog } from '@/components/ToolCallDialog';
 import { useExposure } from '@/hooks/use-exposure';
+import { useToolLayoutStore, type ToolLayout } from '@/stores/tool-layout';
 import { cx } from '@/lib/cx';
 import styles from './Tools.module.css';
 
@@ -115,6 +116,36 @@ function emptyHint(view: ServerView | undefined, truncated: boolean, t: Translat
   return t('tools.groupNoTools');
 }
 
+/**
+ * The exposure switch, in whichever layout is on screen.
+ *
+ * One component because the two layouts must not drift into disagreeing
+ * about what a switch does — and because what it writes is the server's
+ * whole allow list, which is a thing to get wrong in exactly one place.
+ */
+function ExposeSwitch({ tool, view }: { tool: AggregatedTool; view: ServerView }) {
+  const { t } = useTranslation();
+  const expose = useExposure();
+
+  const on = tool.exposed !== '';
+  const busy = expose.isPending && expose.variables?.tool === tool.tool;
+
+  return (
+    <Tooltip title={on ? t('tools.unexpose') : t('tools.expose')}>
+      <Switch
+        size="small"
+        checked={on}
+        loading={busy}
+        disabled={expose.isPending}
+        onChange={(next) =>
+          expose.mutate({ server: view.name, config: view.config, tool: tool.tool, on: next })
+        }
+        aria-label={`${t('tools.expose')} ${tool.tool}`}
+      />
+    </Tooltip>
+  );
+}
+
 function ToolCard({
   tool,
   index,
@@ -128,14 +159,12 @@ function ToolCard({
   onCall: () => void;
 }) {
   const { t } = useTranslation();
-  const expose = useExposure();
 
   // The gateway prefixes and, on a collision, renames. What a client must
   // call is `exposed`, which is not always derivable from the upstream
   // name. A gateway tool has no server and is never renamed.
   const renamed = tool.server !== '' && tool.exposed !== '' && !tool.exposed.endsWith(tool.tool);
   const on = tool.exposed !== '';
-  const busy = expose.isPending && expose.variables?.tool === tool.tool;
 
   return (
     <Reveal index={index}>
@@ -145,25 +174,7 @@ function ToolCard({
               tool has none, so its own name is the headline instead —
               rather than an empty line where a name should be. */}
           <span className={styles.exposed}>{tool.exposed || tool.tool}</span>
-          {view ? (
-            <Tooltip title={on ? t('tools.unexpose') : t('tools.expose')}>
-              <Switch
-                size="small"
-                checked={on}
-                loading={busy}
-                disabled={expose.isPending}
-                onChange={(next) =>
-                  expose.mutate({
-                    server: view.name,
-                    config: view.config,
-                    tool: tool.tool,
-                    on: next,
-                  })
-                }
-                aria-label={`${t('tools.expose')} ${tool.tool}`}
-              />
-            </Tooltip>
-          ) : null}
+          {view ? <ExposeSwitch tool={tool} view={view} /> : null}
         </div>
 
         {tool.description ? <p className={styles.description}>{tool.description}</p> : null}
@@ -191,20 +202,95 @@ function ToolCard({
   );
 }
 
-function ToolGrid({
+/**
+ * One tool per row.
+ *
+ * The same facts as a card, in the order they are scanned rather than
+ * read: the name a client calls, the name on the server, then what it
+ * does. A description is one line here — someone in this layout is
+ * looking for a tool, and the full text is a click away in the call
+ * dialog.
+ */
+function ToolRow({
+  tool,
+  view,
+  onCall,
+}: {
+  tool: AggregatedTool;
+  view?: ServerView | undefined;
+  onCall: () => void;
+}) {
+  const { t } = useTranslation();
+
+  const on = tool.exposed !== '';
+  const renamed = tool.server !== '' && on && !tool.exposed.endsWith(tool.tool);
+
+  return (
+    <div className={cx(styles.row, !on && tool.server !== '' && styles.rowOff)}>
+      <span className={styles.rowName}>{tool.exposed || tool.tool}</span>
+
+      {/* The provenance column. A gateway tool has no server; an unexposed
+          one has no second name to show, since the headline is already its
+          own — so it says what its state is instead. */}
+      {tool.server === '' ? (
+        <span className={styles.rowOrigin}>{t('tools.builtIn')}</span>
+      ) : on ? (
+        <span className={cx(styles.rowOrigin, renamed && styles.renamed)}>{tool.tool}</span>
+      ) : (
+        <span className={styles.rowOrigin}>{t('server.notExposed')}</span>
+      )}
+
+      <span className={styles.rowDescription}>{tool.description ?? ''}</span>
+
+      <span className={styles.rowActions}>
+        {view ? <ExposeSwitch tool={tool} view={view} /> : null}
+        <Button size="small" icon={<ThunderboltOutlined aria-hidden />} onClick={onCall}>
+          {t('tools.call')}
+        </Button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A group's tools, in whichever layout was chosen.
+ *
+ * Both layouts show every tool and offer the same two actions on each. A
+ * layout that quietly left something out would make the choice between
+ * them a choice about what the page tells you, which is not what a view
+ * toggle is for.
+ */
+function ToolGroup({
   tools,
   view,
+  layout,
   onCall,
 }: {
   tools: AggregatedTool[];
   view?: ServerView | undefined;
+  layout: ToolLayout;
   onCall: (tool: AggregatedTool) => void;
 }) {
+  // Keyed by origin, not by exposed name: every unexposed tool has the
+  // same empty one.
+  if (layout === 'list') {
+    return (
+      <div className={styles.list}>
+        {tools.map((tool) => (
+          <ToolRow
+            key={`${tool.server}/${tool.tool}`}
+            tool={tool}
+            view={view}
+            onCall={() => onCall(tool)}
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className={styles.grid}>
       {tools.map((tool, index) => (
-        // Keyed by origin, not by exposed name: every unexposed tool has
-        // the same empty one.
         <ToolCard
           key={`${tool.server}/${tool.tool}`}
           tool={tool}
@@ -223,6 +309,8 @@ export default function Tools() {
   const [search, setSearch] = useState('');
   const [server, setServer] = useState('');
   const [calling, setCalling] = useState<AggregatedTool | null>(null);
+  const layout = useToolLayoutStore((state) => state.layout);
+  const setLayout = useToolLayoutStore((state) => state.setLayout);
 
   // The search runs on the gateway rather than here: it scores matches
   // across every connected server, and the result order is that score.
@@ -359,6 +447,16 @@ export default function Tools() {
             ...groups.map((group) => ({ label: group.server, value: group.server })),
           ]}
         />
+        <span className={styles.spacer} />
+        <Segmented<ToolLayout>
+          value={layout}
+          onChange={setLayout}
+          aria-label={t('tools.layout')}
+          options={[
+            { label: t('tools.asCards'), value: 'cards' },
+            { label: t('tools.asList'), value: 'list' },
+          ]}
+        />
       </div>
 
       {pending ? (
@@ -373,7 +471,7 @@ export default function Tools() {
               count={shownSystem.length}
               actions={<span className={styles.mark}>{t('tools.builtIn')}</span>}
             >
-              <ToolGrid tools={shownSystem} onCall={setCalling} />
+              <ToolGroup tools={shownSystem} layout={layout} onCall={setCalling} />
             </Panel>
           ) : null}
 
@@ -405,7 +503,12 @@ export default function Tools() {
               {group.tools.length === 0 ? (
                 <Nothing title={t('tools.groupEmpty')} hint={emptyHint(group.view, truncated, t)} />
               ) : (
-                <ToolGrid tools={group.tools} view={group.view} onCall={setCalling} />
+                <ToolGroup
+                  tools={group.tools}
+                  view={group.view}
+                  layout={layout}
+                  onCall={setCalling}
+                />
               )}
             </Panel>
           ))}

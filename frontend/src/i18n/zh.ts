@@ -90,6 +90,20 @@ export const zh = {
     import: '批量导入',
   },
 
+  importConfig: {
+    open: '导入',
+    title: '导入整份配置',
+    warning: '导入会替换整份配置：文档里没有的服务器会被删掉。',
+    choose: '选择配置文件',
+    document: '配置文档',
+    placeholder: '把 YAML 或 JSON 粘在这里，或者上面选一个文件',
+    secretsHint:
+      '导出的文件里密钥是 ******** 占位符。导入到同一台实例时，已存在的服务器会保留原来的密钥；这台实例上没有的服务器则会把占位符当成真值存下来，需要事后重填。',
+    replace: '替换配置',
+    rejected: '网关拒绝了这份配置，下面是逐项原因',
+    notADocument: '这不是一份配置文档（顶层要是一个映射）',
+    done: '已导入，共 {{count}} 处变化',
+  },
   import: {
     title: '从其它客户端导入服务器',
     hint: '粘贴 Claude Desktop、Cursor、VS Code 等客户端的配置。整份文件直接贴进来即可——mcpServers 以外的键会被忽略，"type" 与 "command" 等写法会被自动识别。',
@@ -180,6 +194,9 @@ export const zh = {
     groupNoTools: '这台服务器已连接，但一个工具都没有提供',
     groupTruncated: '列表在上限处截断了，这台服务器的工具可能只是没被列出来',
     truncated: '只列出了前 {{count}} 个工具，后面还有 —— 用搜索或者服务器筛选缩小范围',
+    layout: '视图',
+    asCards: '卡片',
+    asList: '列表',
     exposedRatio: '已暴露 {{count}} / {{total}}',
     expose: '暴露给客户端',
     unexpose: '取消暴露（仍可用 call_tool 调用）',

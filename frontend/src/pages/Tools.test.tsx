@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '@/test/harness';
+import { useToolLayoutStore } from '@/stores/tool-layout';
 import Tools from './Tools';
 
 const api = setupServer();
@@ -484,5 +485,94 @@ describe('a list that hit the limit', () => {
     const empty = within(group('zzz'));
     expect(empty.getByText(/可能只是没被列出来/)).toBeInTheDocument();
     expect(empty.queryByText(/都没有勾选对外开放/)).not.toBeInTheDocument();
+  });
+});
+
+/*
+ * The two layouts.
+ *
+ * Cards read well for a dozen tools with descriptions worth reading; they
+ * become a wall to scroll when a server offers forty. Both therefore
+ * exist, and what matters is that they are two views of one page rather
+ * than two pages: the same tools, the same actions on each. A test that
+ * only asserted the toggle exists would pass on a list layout that had
+ * quietly lost its switches.
+ */
+describe('the layout toggle', () => {
+  // The choice is persisted, so it survives from one test into the next
+  // unless it is put back.
+  afterEach(() => {
+    useToolLayoutStore.setState({ layout: 'cards' });
+    localStorage.clear();
+  });
+
+  // The label rather than the radio inside it: antd's segmented control
+  // leaves the input with pointer-events: none, as the label is what a
+  // person clicks.
+  async function switchToList() {
+    await userEvent.click(screen.getByText('列表'));
+  }
+
+  it('shows the same tools in either layout', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await switchToList();
+
+    // Still there, still under its own server.
+    expect(within(group('files')).getByText('files_read')).toBeInTheDocument();
+    expect(within(group('bing')).getByText('bing_search')).toBeInTheDocument();
+    // And the gateway's own, which belong to no server.
+    expect(within(group('系统工具')).getByText('list_servers')).toBeInTheDocument();
+  });
+
+  it('can call a tool from the list layout', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await switchToList();
+
+    const row = screen.getByText('files_read').closest('div');
+    if (!row) throw new Error('the row is not there');
+    await userEvent.click(within(row).getByRole('button', { name: /调用/ }));
+
+    // The call dialog names the tool it is about to call.
+    expect(await screen.findByRole('dialog')).toHaveTextContent('read');
+  });
+
+  it('can expose a tool from the list layout', async () => {
+    let sent: unknown = null;
+    serving([{ server: 'files', tool: 'read', exposed: '', description: 'read a file' }]);
+    api.use(
+      http.put('/api/servers/files', async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(view('files'));
+      }),
+    );
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('read');
+    await switchToList();
+    await userEvent.click(within(group('files')).getByRole('switch'));
+
+    // The whole allow list, through the ordinary server-update endpoint —
+    // the same request the card layout makes.
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toMatchObject({ server: { exposedTools: ['read'] } });
+  });
+
+  it('remembers the choice', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await switchToList();
+
+    expect(useToolLayoutStore.getState().layout).toBe('list');
+    // In the browser's storage, not the gateway's configuration: the
+    // choice belongs to whoever is looking at the screen.
+    expect(localStorage.getItem('mcphub.tools.layout')).toContain('list');
   });
 });
