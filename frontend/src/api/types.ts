@@ -64,6 +64,8 @@ export interface Config {
     maxSizeMB: number;
     mcpWireDebug: boolean;
     apiDebug: boolean;
+    gatewayDebug: boolean;
+    showTraceContext: boolean;
   };
   security: {
     allowedNetworks: string[];

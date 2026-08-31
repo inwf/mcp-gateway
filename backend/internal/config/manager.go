@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"sync"
 )
 
@@ -82,6 +84,47 @@ func (m *Manager) Update(mutate func(*Config) error) ([]Change, error) {
 	// Notify outside the lock: a subscriber must never be able to
 	// deadlock an update by calling back into the manager.
 	m.notify(after)
+	return changes, nil
+}
+
+// Reload re-reads the file and adopts it if it differs from what is
+// running, returning the field-level changes.
+//
+// Nothing is adopted unless it loads and validates. A file being edited
+// is read as often as it is saved, and half of an edit is not a
+// configuration — replacing a working one with it would take the gateway
+// down over a syntax error someone was about to fix.
+//
+// The diff is what makes this safe to call on a timer. The manager's own
+// writes reach the file too, so most reloads find the configuration they
+// already have; comparing rather than assuming is what keeps those from
+// being announced as changes and reconnecting every server.
+//
+// A file that is not there is not a change: the running configuration is
+// not abandoned because someone moved the file aside.
+func (m *Manager) Reload() ([]Change, error) {
+	cfg, err := Load(m.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", m.path, err)
+	}
+
+	m.mu.Lock()
+	changes := Diff(m.cfg, cfg)
+	if len(changes) == 0 {
+		m.mu.Unlock()
+		return nil, nil
+	}
+	m.cfg = cfg
+	m.mu.Unlock()
+
+	// Outside the lock, for the reason Update gives.
+	m.notify(cfg)
 	return changes, nil
 }
 

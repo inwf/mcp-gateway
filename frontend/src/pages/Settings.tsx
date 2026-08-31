@@ -38,6 +38,8 @@ interface FormValues {
   maxSizeMB: number;
   mcpWireDebug: boolean;
   apiDebug: boolean;
+  gatewayDebug: boolean;
+  showTraceContext: boolean;
   allowedNetworks: string[];
   allowedOrigins: string[];
   maxConnections: number;
@@ -64,6 +66,8 @@ function valuesFrom(config: Config): FormValues {
     maxSizeMB: config.logging.maxSizeMB,
     mcpWireDebug: config.logging.mcpWireDebug,
     apiDebug: config.logging.apiDebug,
+    gatewayDebug: config.logging.gatewayDebug,
+    showTraceContext: config.logging.showTraceContext,
     allowedNetworks: config.security.allowedNetworks,
     allowedOrigins: config.security.allowedOrigins ?? [],
     maxConnections: config.security.maxConnections,
@@ -89,12 +93,15 @@ function applyTo(config: Config, values: FormValues): Config {
     ...config,
     listen: { host: values.host.trim(), port: values.port },
     logging: {
+      ...config.logging,
       level: values.level,
       format: values.format,
       maxAge: values.maxAge.trim(),
       maxSizeMB: values.maxSizeMB,
       mcpWireDebug: values.mcpWireDebug,
       apiDebug: values.apiDebug,
+      gatewayDebug: values.gatewayDebug,
+      showTraceContext: values.showTraceContext,
     },
     security: {
       ...config.security,
@@ -116,6 +123,7 @@ function applyTo(config: Config, values: FormValues): Config {
       keepAliveFailureThreshold: values.keepAliveFailureThreshold,
     },
     startup: {
+      ...config.startup,
       connectDelay: values.connectDelay.trim(),
       maxRetries: values.maxRetries,
       retryBackoff: values.retryBackoff.trim(),
@@ -184,6 +192,22 @@ function SettingsForm({ config, onSave, saving }: {
               <Switch />
             </Form.Item>
             <Form.Item name="apiDebug" label={t('settings.apiDebug')} valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item
+              name="gatewayDebug"
+              label={t('settings.gatewayDebug')}
+              extra={t('settings.gatewayDebugHint')}
+              valuePropName="checked"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item
+              name="showTraceContext"
+              label={t('settings.showTraceContext')}
+              extra={t('settings.showTraceContextHint')}
+              valuePropName="checked"
+            >
               <Switch />
             </Form.Item>
           </div>

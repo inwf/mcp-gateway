@@ -234,6 +234,38 @@ func TestValidateServerRules(t *testing.T) {
 			s.Timeout = 0
 			return s
 		}(), "mcpServers.srv.timeout"},
+
+		// A ready pattern is a regular expression, and the moment to say so
+		// is while it is being written — not when a server it was meant to
+		// help will not come up.
+		{"a ready pattern that does not compile", func() config.MCPServer {
+			s := valid
+			s.ReadyPatterns = []string{"listening on [0-9"}
+			return s
+		}(), "mcpServers.srv.readyPatterns[0]"},
+		{"an empty ready pattern", func() config.MCPServer {
+			s := valid
+			s.ReadyPatterns = []string{""}
+			return s
+		}(), "mcpServers.srv.readyPatterns[0]"},
+		{"ready patterns on a transport that starts no process",
+			config.MCPServer{Transport: config.TransportStreamableHTTP,
+				URL: "https://example.com/mcp", Timeout: time.Minute,
+				ReadyPatterns: []string{"ready"}},
+			"mcpServers.srv.readyPatterns"},
+		{"a negative ready timeout", func() config.MCPServer {
+			s := valid
+			s.ReadyPatterns = []string{"ready"}
+			s.ReadyTimeout = -time.Second
+			return s
+		}(), "mcpServers.srv.readyTimeout"},
+		// Setting one alone does nothing, which is worth saying rather than
+		// leaving someone to wonder why their timeout has no effect.
+		{"a ready timeout with nothing to wait for", func() config.MCPServer {
+			s := valid
+			s.ReadyTimeout = time.Second
+			return s
+		}(), "mcpServers.srv.readyTimeout"},
 	}
 
 	for _, tt := range tests {

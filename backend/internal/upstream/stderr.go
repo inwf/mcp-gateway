@@ -26,6 +26,11 @@ type stderrWriter struct {
 	log   *slog.Logger
 	level slog.Level
 
+	// watch is called with each complete line as it arrives, for a caller
+	// waiting to see something in the output. It runs under the lock, so
+	// it must not block.
+	watch func(string)
+
 	mu      sync.Mutex
 	partial []byte
 }
@@ -79,6 +84,9 @@ func (w *stderrWriter) emit(line []byte) {
 	text := string(bytes.TrimRight(line, "\r"))
 	if text == "" {
 		return
+	}
+	if w.watch != nil {
+		w.watch(text)
 	}
 	w.log.Log(context.Background(), w.level, text, "source", "stderr")
 }

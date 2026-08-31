@@ -99,6 +99,26 @@ type Logging struct {
 
 	// APIDebug logs management API request and response bodies.
 	APIDebug bool `yaml:"apiDebug"`
+
+	// GatewayDebug records what the gateway itself is doing — what it
+	// publishes, withdraws and forwards — at debug level, without turning
+	// debug on everywhere.
+	//
+	// The whole-program level is the blunt instrument: at debug it also
+	// carries every upstream server's chatter and every HTTP request, and
+	// the thing being looked for goes past in the middle of it.
+	GatewayDebug bool `yaml:"gatewayDebug"`
+
+	// ShowTraceContext includes the identifiers that tie records to one
+	// request or one client session — requestId and session — in the
+	// console and file output. On by default: without them a log of a
+	// busy gateway is a list of things that happened in no particular
+	// company.
+	//
+	// Turning it off shortens each line for reading over someone's
+	// shoulder. It does not affect what the log viewer holds, which keeps
+	// every attribute either way.
+	ShowTraceContext bool `yaml:"showTraceContext"`
 }
 
 // Security limits who may reach the listener and how much concurrent
@@ -214,6 +234,29 @@ type MCPServer struct {
 	Command string            `yaml:"command,omitempty"`
 	Args    []string          `yaml:"args,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
+
+	// ReadyPatterns are regular expressions matched against the lines a
+	// child process writes to standard error. When any of them matches,
+	// the server is taken to be ready and the handshake begins.
+	//
+	// They exist for the servers that print something like "listening on
+	// ..." before they can answer, and that would otherwise spend their
+	// whole startup inside the handshake's timeout. Waiting for the line
+	// instead means a server that takes a minute to install itself is
+	// waited for rather than declared broken.
+	//
+	// A server that says nothing needs none of this: with no patterns the
+	// handshake starts immediately, which is what almost every server
+	// wants.
+	ReadyPatterns []string `yaml:"readyPatterns,omitempty"`
+
+	// ReadyTimeout bounds that wait. Zero means DefaultReadyTimeout.
+	//
+	// Running out of it is not a failure: the handshake is attempted
+	// anyway. A pattern that never matches — a typo, or a message the
+	// server stopped printing — would otherwise turn one wrong character
+	// in the configuration into a server that can never connect.
+	ReadyTimeout time.Duration `yaml:"readyTimeout,omitempty"`
 
 	// URL, Headers and Proxy apply to the streamable-http transport.
 	URL     string            `yaml:"url,omitempty"`

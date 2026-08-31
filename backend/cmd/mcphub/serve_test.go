@@ -26,6 +26,14 @@ import (
 // instance.
 func running(t *testing.T, adjust func(*config.Config)) (baseURL string, stop func(), finished <-chan error) {
 	t.Helper()
+	baseURL, _, stop, finished = runningAt(t, adjust)
+	return baseURL, stop, finished
+}
+
+// runningAt is the same, and also hands back the configuration file, for
+// the tests that edit it while the gateway is running.
+func runningAt(t *testing.T, adjust func(*config.Config)) (baseURL, cfgPath string, stop func(), finished <-chan error) {
+	t.Helper()
 
 	dir := isolated(t)
 	cfg := config.Default()
@@ -37,8 +45,8 @@ func running(t *testing.T, adjust func(*config.Config)) (baseURL string, stop fu
 		adjust(&cfg)
 	}
 
-	cfgPath := filepath.Join(dir, "config.yaml")
-	if err := config.Save(cfgPath, cfg); err != nil {
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.Save(path, cfg); err != nil {
 		t.Fatalf("save the configuration: %v", err)
 	}
 
@@ -55,7 +63,7 @@ func running(t *testing.T, adjust func(*config.Config)) (baseURL string, stop fu
 
 	select {
 	case addr := <-ready:
-		return "http://" + addr, cancel, done
+		return "http://" + addr, path, cancel, done
 	case err := <-done:
 		cancel()
 		t.Fatalf("serve returned before it was listening: %v", err)
@@ -63,7 +71,7 @@ func running(t *testing.T, adjust func(*config.Config)) (baseURL string, stop fu
 		cancel()
 		t.Fatal("serve never reported that it was listening")
 	}
-	return "", nil, nil
+	return "", "", nil, nil
 }
 
 // ===== serving =====
@@ -106,6 +114,33 @@ func TestServeMountsTheMCPEndpoint(t *testing.T) {
 	if resp.StatusCode == http.StatusNotFound {
 		t.Error("the mcp endpoint is not mounted")
 	}
+}
+
+// The file is an interface of its own. Someone who edits config.yaml
+// while the gateway is running should not have to restart it, and this
+// is the whole path: the file is replaced by a rename, the running
+// instance notices, applies it, and connects what appeared.
+func TestServeAdoptsAnEditToTheConfigurationFile(t *testing.T) {
+	base, cfgPath, stop, done := runningAt(t, nil)
+	defer func() { stop(); <-done }()
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load the configuration: %v", err)
+	}
+	added, err := testmcp.ServerConfig(testmcp.ModeFull)
+	if err != nil {
+		t.Fatalf("build the upstream configuration: %v", err)
+	}
+	cfg.MCPServers = map[string]config.MCPServer{"appeared": added}
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save the configuration: %v", err)
+	}
+
+	// Connected, not merely configured: adopting the file has to reach the
+	// connection manager, or the new server would sit there listed and
+	// dead.
+	waitForState(t, hostPort(t, base), "appeared", "connected")
 }
 
 // A configuration file that does not exist yet has to be created, or the

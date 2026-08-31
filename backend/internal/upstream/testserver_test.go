@@ -23,5 +23,6 @@ const (
 	modeFull        = testmcp.ModeFull
 	modeToolsOnly   = testmcp.ModeToolsOnly
 	modeNoisyStderr = testmcp.ModeNoisyStderr
+	modeSlowReady   = testmcp.ModeSlowReady
 	modeCrash       = testmcp.ModeCrash
 )

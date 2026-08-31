@@ -45,9 +45,20 @@ const (
 	// ModeNoisyStderr writes to standard error before serving.
 	ModeNoisyStderr = "noisy-stderr"
 
+	// ModeSlowReady waits before announcing itself, which is the shape of
+	// a server that installs or loads something before it can answer.
+	ModeSlowReady = "slow-ready"
+
 	// ModeCrash complains on standard error and exits without speaking
 	// MCP at all.
 	ModeCrash = "crash"
+)
+
+// ReadyLine is what [ModeSlowReady] prints once it is about to serve, and
+// SlowReadyDelay is how long it takes to get there.
+const (
+	ReadyLine      = "ready: accepting requests"
+	SlowReadyDelay = 400 * time.Millisecond
 )
 
 // ServerName and ServerVersion are what the test server reports during
@@ -131,6 +142,11 @@ func serve(mode string) int {
 		// A trailing line with no newline is the common shape of output
 		// from a process that is interrupted.
 		fmt.Fprint(os.Stderr, "no newline at the end")
+	}
+	if mode == ModeSlowReady {
+		fmt.Fprintln(os.Stderr, "starting up, this may take a moment")
+		time.Sleep(SlowReadyDelay)
+		fmt.Fprintln(os.Stderr, ReadyLine)
 	}
 
 	// Run returns once the client closes the connection, which is the

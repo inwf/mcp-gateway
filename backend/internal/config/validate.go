@@ -263,6 +263,33 @@ func validateServer(v *validator, field string, s MCPServer) {
 	}
 
 	v.positiveDuration(field+".timeout", s.Timeout)
+	validateReadiness(v, field, s, spawns)
+}
+
+// validateReadiness checks the ready patterns here rather than at dial
+// time, which is the difference between a mistake reported while it is
+// being made and one reported when a server will not come up.
+func validateReadiness(v *validator, field string, s MCPServer, spawns bool) {
+	if len(s.ReadyPatterns) > 0 && !spawns {
+		v.add(field+".readyPatterns", "is set but the %s transport does not start a process, "+
+			"so there is no output to wait for", s.Transport)
+	}
+
+	for i, pattern := range s.ReadyPatterns {
+		at := fmt.Sprintf("%s.readyPatterns[%d]", field, i)
+		if pattern == "" {
+			v.add(at, "is empty, which would match every line")
+			continue
+		}
+		if _, err := regexp.Compile(pattern); err != nil {
+			v.add(at, "is not a valid regular expression: %s", err)
+		}
+	}
+
+	v.nonNegativeDuration(field+".readyTimeout", s.ReadyTimeout)
+	if s.ReadyTimeout > 0 && len(s.ReadyPatterns) == 0 {
+		v.add(field+".readyTimeout", "is set but there are no readyPatterns to wait for")
+	}
 }
 
 // validator accumulates field errors in the order they are found.

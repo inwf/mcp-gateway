@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"sync"
@@ -249,6 +250,10 @@ func (g *Gateway) Sync() {
 	if added > 0 || len(removed) > 0 {
 		g.log.Info("published the upstream tools",
 			"added", added, "removed", len(removed), "total", len(current))
+		// The counts say how much moved; which names moved is the question
+		// asked by someone whose tool is not on the list they expected.
+		g.log.Debug("the published set changed",
+			"withdrawn", removed, "offering", slices.Sorted(maps.Keys(current)))
 	}
 
 	g.syncResources()
@@ -282,8 +287,12 @@ func (g *Gateway) forward(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		// An upstream failure is something the model can read and react
 		// to, so it belongs in the result rather than in a protocol
 		// error it never sees.
+		g.log.Debug("a forwarded call failed",
+			"tool", name, "server", route.Server, "upstreamTool", route.Tool, "error", err)
 		return toolError(err), nil
 	}
+	g.log.Debug("forwarded a call",
+		"tool", name, "server", route.Server, "upstreamTool", route.Tool)
 	return result, nil
 }
 

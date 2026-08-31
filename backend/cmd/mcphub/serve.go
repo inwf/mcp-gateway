@@ -121,6 +121,25 @@ func serve(ctx context.Context, opts serveOptions, stdout, stderr io.Writer) err
 		cfg.Listen.Port = *opts.Port
 	}
 
+	// The file is an interface of its own: someone can edit config.yaml
+	// while the gateway is running, and until now that took a restart.
+	// Applying it goes through the API's own path, so an edit on disk and
+	// an edit through the web interface do the same thing.
+	configs.Watch(ctx, config.WatchOptions{
+		OnChange: func(changes []config.Change) {
+			cli.Info("the configuration file changed", "changes", len(changes),
+				"fields", fieldsOf(changes))
+			served.ApplyConfiguration()
+		},
+		OnError: func(err error) {
+			// Still running on the last good configuration, so this is a
+			// warning rather than a failure — but the edit someone just made
+			// is not in effect, and only they can fix it.
+			cli.Warn("the configuration file changed but could not be loaded; "+
+				"the previous configuration is still running", "error", err)
+		},
+	})
+
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Listen.Host, cfg.Listen.Port))
 	if err != nil {
 		return fmt.Errorf("listen on %s:%d: %w", cfg.Listen.Host, cfg.Listen.Port, err)
@@ -174,6 +193,17 @@ func serve(ctx context.Context, opts serveOptions, stdout, stderr io.Writer) err
 
 	shutdown(cli, served, httpServer, ups)
 	return nil
+}
+
+// fieldsOf names the settings that changed, for the log line. The values
+// are left out on purpose: a configuration holds credentials, and the
+// interesting part of a change here is which setting moved.
+func fieldsOf(changes []config.Change) []string {
+	fields := make([]string, 0, len(changes))
+	for _, change := range changes {
+		fields = append(fields, change.Field)
+	}
+	return fields
 }
 
 // shutdown stops serving and releases everything, in the one order that

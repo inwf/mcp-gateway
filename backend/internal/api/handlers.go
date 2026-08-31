@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"mcphub/internal/config"
+	"mcphub/internal/events"
 )
 
 // maxRequestBody bounds a request body. Without a bound, one request
@@ -100,27 +102,53 @@ func queryTime(c *gin.Context, name string) (time.Time, error) {
 // Connecting does not: a new server can take seconds to start, and
 // holding the request open for it would make an edit look like a hang.
 func (a *API) applyConfig(c *gin.Context) {
-	if a.opts.Upstreams == nil {
-		return
+	a.applyConfiguration(slog.String("requestId", RequestID(c)))
+}
+
+// ApplyConfiguration is the same work for a change that did not arrive as
+// a request — the file having been edited directly.
+//
+// It is one function rather than two because "make the running state
+// match the configuration" is one behaviour: which servers to add, drop
+// and reconnect, what to republish, and who to tell. A second
+// implementation for the file-watching path would be a second answer to
+// that question, and the two would differ the first time either was
+// changed.
+func (a *API) ApplyConfiguration() {
+	a.applyConfiguration(slog.String("source", "the configuration file"))
+}
+
+func (a *API) applyConfiguration(origin slog.Attr) {
+	if a.opts.Upstreams != nil {
+		cfg := a.opts.Configs.Get()
+		added, removed, changed := a.opts.Upstreams.Apply(cfg)
+
+		if len(added) > 0 || len(removed) > 0 || len(changed) > 0 {
+			a.log.Info("the running servers were brought into line with the configuration",
+				origin, "added", added, "removed", removed, "changed", changed)
+		}
+
+		// Reconnecting is what a changed server needs; a new one has never
+		// been connected at all.
+		toConnect := append(append([]string{}, added...), changed...)
+		if len(toConnect) > 0 {
+			go a.connectInBackground(toConnect, cfg.Startup)
+		}
+
+		a.syncGateway()
 	}
 
-	cfg := a.opts.Configs.Get()
-	added, removed, changed := a.opts.Upstreams.Apply(cfg)
-
-	if len(added) > 0 || len(removed) > 0 || len(changed) > 0 {
-		a.log.Info("the running servers were brought into line with the configuration",
-			"requestId", RequestID(c),
-			"added", added, "removed", removed, "changed", changed)
+	// Announced last, when the running state already matches: a browser
+	// reacts by refetching everything, and answering that refetch from a
+	// half-applied state would put a stale picture on screen and leave it
+	// there until something else changed.
+	//
+	// Announced at all because the writer is not the only one watching. A
+	// second tab, or another person's browser, has no other way to learn
+	// that the servers it is showing are no longer the configured ones.
+	if a.opts.Bus != nil {
+		a.opts.Bus.Publish(events.Event{Kind: events.ConfigUpdated})
 	}
-
-	// Reconnecting is what a changed server needs; a new one has never
-	// been connected at all.
-	toConnect := append(append([]string{}, added...), changed...)
-	if len(toConnect) > 0 {
-		go a.connectInBackground(toConnect, cfg.Startup)
-	}
-
-	a.syncGateway()
 }
 
 // connectInBackground connects servers without holding a request open.

@@ -25,12 +25,14 @@ func Default() Config {
 		},
 
 		Logging: Logging{
-			Level:        LevelInfo,
-			Format:       "console",
-			MaxAge:       7 * 24 * time.Hour,
-			MaxSizeMB:    50,
-			MCPWireDebug: false,
-			APIDebug:     false,
+			Level:            LevelInfo,
+			Format:           "console",
+			MaxAge:           7 * 24 * time.Hour,
+			MaxSizeMB:        50,
+			MCPWireDebug:     false,
+			APIDebug:         false,
+			GatewayDebug:     false,
+			ShowTraceContext: true,
 		},
 
 		Security: Security{
@@ -70,12 +72,28 @@ func Default() Config {
 	}
 }
 
+// DefaultReadyTimeout is how long a server with ready patterns is waited
+// for when it does not say.
+//
+// A compromise between two costs. Waiting longer helps a server that is
+// genuinely slow to start — a package manager fetching one that has never
+// run on this machine. Waiting less limits the damage when the pattern is
+// wrong, which is the more likely mistake: that wait is paid in full on
+// every connection attempt and every retry, before there is any evidence
+// the server works at all. Anyone who needs longer can say so, in the
+// field right next to the patterns.
+const DefaultReadyTimeout = 30 * time.Second
+
 // DefaultMCPServer returns the values an upstream server entry takes for
 // the fields it does not specify.
 //
 // Enabled defaults to true, which is why loading seeds this value before
 // decoding an entry: after decoding, an omitted "enabled" and an
 // explicit "enabled: false" would be indistinguishable.
+//
+// ReadyTimeout is deliberately left at zero rather than seeded here: it
+// only means anything alongside ready patterns, and seeding it would
+// write a readyTimeout into the file of every server that has none.
 func DefaultMCPServer() MCPServer {
 	return MCPServer{
 		Transport: TransportStdio,

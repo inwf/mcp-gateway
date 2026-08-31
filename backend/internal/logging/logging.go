@@ -44,10 +44,25 @@ type Options struct {
 	// API. Nil means do not retain records in memory.
 	Store *Store
 
+	// ModuleLevels lowers the threshold for particular modules, so that
+	// one subsystem can be followed in detail without the rest of the
+	// program drowning it out. A module not named here uses Level.
+	ModuleLevels map[string]slog.Level
+
+	// HideTraceContext leaves the correlation identifiers out of the
+	// console and file output. The store keeps them either way: a shorter
+	// line to read is a display choice, not a reason to lose the data the
+	// log viewer filters on.
+	HideTraceContext bool
+
 	// Now overrides the clock, which is how rotation and retention are
 	// tested without waiting.
 	Now func() time.Time
 }
+
+// TraceAttrs are the keys that tie a record to one request or one
+// client session, which is what [Options.HideTraceContext] hides.
+var TraceAttrs = []string{"requestId", "session"}
 
 // OptionsFrom derives logger options from the configuration.
 func OptionsFrom(cfg config.Logging, paths config.Paths, store *Store) (Options, error) {
@@ -55,14 +70,22 @@ func OptionsFrom(cfg config.Logging, paths config.Paths, store *Store) (Options,
 	if err != nil {
 		return Options{}, err
 	}
+
+	var moduleLevels map[string]slog.Level
+	if cfg.GatewayDebug {
+		moduleLevels = map[string]slog.Level{ModuleGateway: slog.LevelDebug}
+	}
+
 	return Options{
-		Level:     level,
-		Format:    cfg.Format,
-		FilePath:  paths.LogFile(),
-		MaxAge:    cfg.MaxAge,
-		MaxSizeMB: cfg.MaxSizeMB,
-		Stdout:    os.Stdout,
-		Store:     store,
+		Level:            level,
+		Format:           cfg.Format,
+		FilePath:         paths.LogFile(),
+		MaxAge:           cfg.MaxAge,
+		MaxSizeMB:        cfg.MaxSizeMB,
+		Stdout:           os.Stdout,
+		Store:            store,
+		ModuleLevels:     moduleLevels,
+		HideTraceContext: !cfg.ShowTraceContext,
 	}, nil
 }
 
@@ -115,11 +138,21 @@ func New(opts Options) (*Logger, error) {
 		opts.Format = FormatConsole
 	}
 
+	// The destinations are built at the lowest level anything asks for,
+	// because a record they reject is a record the module gate above them
+	// never gets to allow. That gate is then the only one that decides.
+	floor := opts.Level
+	for _, level := range opts.ModuleLevels {
+		if level < floor {
+			floor = level
+		}
+	}
+
 	var handlers []slog.Handler
 	var file io.Closer
 
 	if opts.Stdout != nil {
-		handlers = append(handlers, newTextOrJSON(opts.Stdout, opts))
+		handlers = append(handlers, newTextOrJSON(opts.Stdout, opts, floor))
 	}
 
 	if opts.FilePath != "" {
@@ -133,14 +166,22 @@ func New(opts Options) (*Logger, error) {
 			return nil, err
 		}
 		file = w
-		handlers = append(handlers, newTextOrJSON(w, opts))
+		handlers = append(handlers, newTextOrJSON(w, opts, floor))
 	}
 
 	if opts.Store != nil {
-		handlers = append(handlers, newStoreHandler(opts.Store, opts.Level, opts.Now))
+		handlers = append(handlers, newStoreHandler(opts.Store, floor, opts.Now))
 	}
 
-	return &Logger{Logger: slog.New(fanout(handlers)), file: file}, nil
+	var handler slog.Handler = fanout(handlers)
+	if len(opts.ModuleLevels) > 0 {
+		handler = &moduleGate{
+			next:    handler,
+			base:    opts.Level,
+			byModul: opts.ModuleLevels,
+		}
+	}
+	return &Logger{Logger: slog.New(handler), file: file}, nil
 }
 
 // Close releases the log file, if one was opened.
@@ -151,12 +192,72 @@ func (l *Logger) Close() error {
 	return l.file.Close()
 }
 
-func newTextOrJSON(w io.Writer, opts Options) slog.Handler {
-	handlerOpts := &slog.HandlerOptions{Level: opts.Level}
+func newTextOrJSON(w io.Writer, opts Options, level slog.Level) slog.Handler {
+	handlerOpts := &slog.HandlerOptions{Level: level}
+	if opts.HideTraceContext {
+		handlerOpts.ReplaceAttr = dropTraceAttrs
+	}
 	if opts.Format == FormatJSON {
 		return slog.NewJSONHandler(w, handlerOpts)
 	}
 	return slog.NewTextHandler(w, handlerOpts)
+}
+
+// dropTraceAttrs removes the correlation identifiers from a formatted
+// line. An empty Attr is how slog is told to leave one out.
+func dropTraceAttrs(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) > 0 {
+		return a
+	}
+	for _, key := range TraceAttrs {
+		if a.Key == key {
+			return slog.Attr{}
+		}
+	}
+	return a
+}
+
+// moduleGate decides whether a record passes, per module.
+//
+// It has to be a handler rather than a check at the call site because
+// slog asks Enabled before it builds a record, and the answer depends on
+// which module is logging. The module arrives through WithAttrs — which
+// is what [Logger.For] does — so each derived handler knows its own
+// module and can answer for itself.
+type moduleGate struct {
+	next    slog.Handler
+	base    slog.Level
+	byModul map[string]slog.Level
+	module  string
+}
+
+func (g *moduleGate) threshold() slog.Level {
+	if level, named := g.byModul[g.module]; named {
+		return level
+	}
+	return g.base
+}
+
+func (g *moduleGate) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= g.threshold()
+}
+
+func (g *moduleGate) Handle(ctx context.Context, record slog.Record) error {
+	return g.next.Handle(ctx, record)
+}
+
+func (g *moduleGate) WithAttrs(attrs []slog.Attr) slog.Handler {
+	out := &moduleGate{next: g.next.WithAttrs(attrs), base: g.base, byModul: g.byModul, module: g.module}
+	for _, attr := range attrs {
+		if attr.Key == AttrModule {
+			out.module = attr.Value.String()
+		}
+	}
+	return out
+}
+
+func (g *moduleGate) WithGroup(name string) slog.Handler {
+	return &moduleGate{next: g.next.WithGroup(name), base: g.base, byModul: g.byModul, module: g.module}
 }
 
 // fanout delivers each record to every handler. A handler that fails

@@ -357,17 +357,47 @@ func (c *Conn) dialStdio(ctx context.Context, cfg config.MCPServer) (*mcp.Client
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 
+	ready, err := newReadyProbe(cfg)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%s: %w", c.name, err)
+	}
+
 	stderr := newStderrWriter(c.deps.logger())
+	stderr.watch = ready.observe
 	cmd.Stderr = stderr
 
-	session, err := c.newClient().Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	// Starting the process and shaking hands with it are done in two
+	// steps rather than one, so that waiting for the server to be ready
+	// can happen in between. The transport is the SDK's own, so what it
+	// does either side of this — the pipes, and closing stdin then
+	// terminating the child on shutdown — is unchanged.
+	transport := &mcp.CommandTransport{Command: cmd}
+	connection, err := transport.Connect(ctx)
+	if err != nil {
+		stderr.Flush()
+		return nil, nil, nil, fmt.Errorf("start %s (%s): %w", c.name, cfg.Command, err)
+	}
+
+	ready.wait(ctx, c.deps.logger(), c.name)
+
+	session, err := c.newClient().Connect(ctx, startedTransport{connection}, nil)
 	if err != nil {
 		// The child's own complaint explains the failure far better than
 		// a transport error does.
 		stderr.Flush()
+		_ = connection.Close()
 		return nil, nil, nil, fmt.Errorf("start %s (%s): %w", c.name, cfg.Command, err)
 	}
 	return session, cmd, stderr, nil
+}
+
+// startedTransport hands the client a connection that has already been
+// established, which is what lets the two halves of dialStdio be
+// separated without reimplementing either of them.
+type startedTransport struct{ connection mcp.Connection }
+
+func (t startedTransport) Connect(context.Context) (mcp.Connection, error) {
+	return t.connection, nil
 }
 
 // dialStreamableHTTP connects to a server that is already running.

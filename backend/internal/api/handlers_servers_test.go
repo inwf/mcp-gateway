@@ -3,9 +3,11 @@ package api_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"mcphub/internal/api"
 	"mcphub/internal/config"
+	"mcphub/internal/events"
 	"mcphub/internal/upstream"
 )
 
@@ -93,6 +95,34 @@ func TestGettingAServerThatDoesNotExist(t *testing.T) {
 }
 
 // ===== creating =====
+
+// A configuration change has to be announced, because the client that
+// made it is not the only one looking: another tab, or another person's
+// browser, has no other way to learn that what it is showing is out of
+// date. The frontend answers this event by refetching everything.
+func TestAConfigurationChangeIsAnnounced(t *testing.T) {
+	h, bus := watching(t, nil)
+
+	seen, cancel := bus.Subscribe(events.ConfigUpdated)
+	defer cancel()
+
+	resp := h.do(t, http.MethodPost, "/api/servers", map[string]any{
+		"name":   "added",
+		"server": toWire(t, server(nil)),
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+
+	select {
+	case event := <-seen:
+		if event.Kind != events.ConfigUpdated {
+			t.Errorf("kind = %q, want %q", event.Kind, events.ConfigUpdated)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("nothing was published when the configuration changed")
+	}
+}
 
 func TestCreatingAServer(t *testing.T) {
 	h := start(t, nil)
