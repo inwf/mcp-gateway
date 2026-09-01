@@ -124,9 +124,13 @@ type getToolOutput struct {
 // ===== call_tool =====
 
 type callToolInput struct {
-	Server string         `json:"server" jsonschema:"exact name of the MCP server"`
-	Tool   string         `json:"tool" jsonschema:"exact name of the tool on that server"`
-	Args   map[string]any `json:"args,omitempty" jsonschema:"arguments for the tool, matching its input schema"`
+	// The second sentence is there because a caller that has just been
+	// told a server's name will otherwise go looking for it again. Every
+	// round trip it saves is one the caller was going to spend re-reading
+	// something it already had.
+	Server string         `json:"server" jsonschema:"exact name of the MCP server, as returned by list_servers. If a previous list_tools or search_tools result already told you the server name, use it and call straight away rather than searching again"`
+	Tool   string         `json:"tool" jsonschema:"exact name of the tool on that server, as returned by list_tools or search_tools. It does not have to be a tool that appears in this gateway's own tool list"`
+	Args   map[string]any `json:"args,omitempty" jsonschema:"arguments for the tool, matching its input schema. Omit it for a tool that takes none"`
 }
 
 // ===== search_tools =====
@@ -319,7 +323,7 @@ func listTools(ups Upstreams, cfgs Configs, server string) (listToolsOutput, err
 func getTool(ups Upstreams, cfgs Configs, server, tool string) (getToolOutput, error) {
 	all := ups.Tools()
 	if err := requireServer(ups, server); err != nil {
-		return getToolOutput{}, err
+		return getToolOutput{}, withSystemToolHint(err, tool)
 	}
 
 	for _, candidate := range all[server] {
@@ -462,6 +466,27 @@ func unknownServer(server string, known []string) error {
 		return fmt.Errorf("no server named %q; no servers are configured", server)
 	}
 	return fmt.Errorf("no server named %q; the configured servers are %s", server, joinNames(known))
+}
+
+// withSystemToolHint supplies the half of the answer the caller actually
+// needed, when it asked some server for one of the gateway's own tools.
+//
+// Listing the configured servers tells a caller that its guess was wrong.
+// It does not tell it the thing it is looking for needs no server at all —
+// so a caller that guessed the gateway's own name learns nothing it can
+// act on, and goes on guessing. The check is on the tool rather than on
+// the name guessed at, because the gateway cannot know what a client calls
+// it, but it does know which tools are its own.
+//
+// Only reached once the server has already been rejected: an upstream
+// server is free to have a tool called list_servers, and asking that
+// server for it must still work.
+func withSystemToolHint(err error, tool string) error {
+	if !IsSystemTool(tool) {
+		return err
+	}
+	return fmt.Errorf("%w; note that %q is one of this gateway's own tools — it is already in the tool list, "+
+		"call it directly and pass no server name", err, tool)
 }
 
 // toolError turns a failure into a result the model can read and act on,

@@ -466,6 +466,57 @@ func TestGetToolThatDoesNotExist(t *testing.T) {
 	}
 }
 
+// A client knows the gateway by whatever name its own configuration gives
+// it, which the gateway never sees. So a caller looking for call_tool's
+// schema will guess a server name, and the guess will be wrong.
+//
+// Listing the configured servers answers "that name is not one of these".
+// It does not answer the question actually being asked, and a caller that
+// learns nothing from an error goes on making the same one.
+func TestAskingSomeServerForAGatewayToolExplainsItself(t *testing.T) {
+	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
+
+	result := callSystemTool(t, session, gateway.ToolGetTool,
+		map[string]any{"server": "my-mcp-gateway", "tool": gateway.ToolCallTool})
+
+	if !result.IsError {
+		t.Fatal("a made-up server name succeeded")
+	}
+	text := resultText(result)
+	if !strings.Contains(text, "call it directly") {
+		t.Errorf("error %q does not say how to reach a gateway tool", text)
+	}
+	// And it still says what the real servers are, which is the half that
+	// was already right.
+	if !strings.Contains(text, "files") {
+		t.Errorf("error %q no longer names the configured servers", text)
+	}
+}
+
+// The hint is about the gateway's own tools, not about the name that was
+// guessed at — so an upstream server that happens to publish a tool called
+// list_servers must still be served, not lectured.
+func TestAnUpstreamToolMayShareAGatewayToolName(t *testing.T) {
+	ups := twoServers()
+	ups.tools["files"] = append(ups.tools["files"],
+		&mcp.Tool{Name: gateway.ToolListServers, Description: "list the files server's own servers"})
+	session := gatewayFixture(t, ups, twoServersConfig(t))
+
+	result := callSystemTool(t, session, gateway.ToolGetTool,
+		map[string]any{"server": "files", "tool": gateway.ToolListServers})
+
+	if result.IsError {
+		t.Fatalf("an upstream tool with a gateway tool's name was refused: %s", resultText(result))
+	}
+	var out struct {
+		Description string `json:"description"`
+	}
+	structured(t, result, &out)
+	if out.Description != "list the files server's own servers" {
+		t.Errorf("description = %q, want the upstream tool's own", out.Description)
+	}
+}
+
 func TestCallTool(t *testing.T) {
 	ups := twoServers()
 	session := gatewayFixture(t, ups, twoServersConfig(t))

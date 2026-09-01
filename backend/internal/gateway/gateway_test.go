@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -114,6 +115,41 @@ func TestGatewayExposesSystemAndForwardedTools(t *testing.T) {
 		if !slices.Contains(names, want) {
 			t.Errorf("forwarded tool %q is missing from %v", want, names)
 		}
+	}
+}
+
+// The handshake is the only thing every client reads before it has called
+// anything, so it is the only place that can explain the shape of this
+// gateway to a caller who will otherwise see seven tools and conclude the
+// upstream ones do not exist.
+//
+// The names are read out of the constant rather than written down here.
+// The text this replaced named three of the seven tools and omitted
+// call_tool — the one that runs anything — and no test noticed, because
+// there was nothing comparing the prose against the tool set.
+func TestTheHandshakeExplainsEveryGatewayTool(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	init := session.InitializeResult()
+	if init == nil {
+		t.Fatal("the gateway returned no initialize result")
+	}
+	said := init.Instructions
+	if said == "" {
+		t.Fatal("the gateway told the client nothing at all")
+	}
+
+	for _, name := range gateway.SystemToolNames {
+		if !strings.Contains(said, name) {
+			t.Errorf("the handshake never mentions %q:\n%s", name, said)
+		}
+	}
+
+	// The guide is the long version. A resource nothing points at is a
+	// resource nobody reads.
+	if !strings.Contains(said, gateway.GuideResourceURI) {
+		t.Errorf("the handshake never points at %s:\n%s", gateway.GuideResourceURI, said)
 	}
 }
 
@@ -594,6 +630,85 @@ func TestReadingAServerResource(t *testing.T) {
 	if text := result.Contents[0].Text; !strings.Contains(text, "files") {
 		t.Errorf("contents %q do not describe the server", text)
 	}
+}
+
+// The tool list is why this resource is worth reading: without it,
+// understanding a server with seven tools costs seven calls to get_tool.
+// One read has to answer "what can this server do".
+func TestAServerResourceListsWhatTheServerCanDo(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	described := readServerResource(t, session, "files")
+
+	want := map[string]string{
+		"read":  "read a file from disk",
+		"write": "write a file to disk",
+	}
+	if !maps.Equal(described.Tools, want) {
+		t.Errorf("tools = %v, want %v", described.Tools, want)
+	}
+
+	// This configuration records no description, and a caller can do
+	// something about that — so the field says so and names the tool that
+	// fixes it, rather than being absent.
+	if !strings.Contains(described.Description, "update_server_description") {
+		t.Errorf("description %q does not say how to record one", described.Description)
+	}
+}
+
+func TestAServerResourceCarriesTheRecordedDescription(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), func(o *gateway.Options) {
+		o.Configs = twoServersConfig(t)
+	})
+	session := clientOn(t, url, nil)
+
+	described := readServerResource(t, session, "files")
+
+	if described.Description != "local filesystem" {
+		t.Errorf("description = %q, want the one from the configuration", described.Description)
+	}
+	if described.Tags["env"] != "dev" {
+		t.Errorf("tags = %v, want the ones from the configuration", described.Tags)
+	}
+	// The connection status is still there; the description is added to it,
+	// not substituted for it.
+	if described.State != upstream.StateConnected {
+		t.Errorf("state = %q, want the connection state as well", described.State)
+	}
+}
+
+// serverResource is the shape a client sees at hub://servers/{name}. It is
+// spelled out here rather than imported so that the test breaks when the
+// published shape changes, which is the thing worth noticing.
+type serverResource struct {
+	Name        string            `json:"name"`
+	State       upstream.State    `json:"state"`
+	Description string            `json:"description"`
+	Tags        map[string]string `json:"tags"`
+	Tools       map[string]string `json:"tools"`
+}
+
+func readServerResource(t *testing.T, session *mcp.ClientSession, server string) serverResource {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := session.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: gateway.ServerResourceURI(server),
+	})
+	if err != nil {
+		t.Fatalf("ReadResource(%s): %v", server, err)
+	}
+	if len(result.Contents) == 0 {
+		t.Fatalf("the resource for %q has no contents", server)
+	}
+
+	var described serverResource
+	if err := json.Unmarshal([]byte(result.Contents[0].Text), &described); err != nil {
+		t.Fatalf("decode %s: %v", result.Contents[0].Text, err)
+	}
+	return described
 }
 
 func TestReadingAForwardedResource(t *testing.T) {
