@@ -64,14 +64,34 @@ type listServersInput struct{}
 
 // ServerSummary describes one configured server.
 type ServerSummary struct {
-	Name          string            `json:"name"`
-	State         string            `json:"state"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+
+	// Title is the name the server called itself during the handshake,
+	// reported when it differs from the name it is configured under.
+	//
+	// The configured name is chosen by whoever wrote the file and is often
+	// a shorthand — "xingzuo" for a server that calls itself 星座 MCP 服务.
+	// A caller deciding whether a server is worth opening has nothing else
+	// to go on when no description has been recorded, and the gateway has
+	// had this string since the handshake.
+	Title string `json:"title,omitempty"`
+
 	Description   string            `json:"description,omitempty"`
 	Tags          map[string]string `json:"tags,omitempty"`
 	ToolCount     int               `json:"toolCount"`
 	ResourceCount int               `json:"resourceCount"`
 	Error         string            `json:"error,omitempty"`
 }
+
+// A server nobody has described says so, and names both ways out: look at
+// what it offers, or record what you concluded. Two wordings because the
+// tools are in front of the reader in one case and a call away in the
+// other, and a sentence that points at something absent is worse than none.
+const (
+	undescribedInList     = "no description has been recorded; list_tools shows what this server offers, and update_server_description saves a description for it"
+	undescribedInResource = "no description has been recorded; the tools below are what this server offers, and update_server_description saves a description for it"
+)
 
 type listServersOutput struct {
 	Servers []ServerSummary `json:"servers"`
@@ -80,7 +100,7 @@ type listServersOutput struct {
 // ===== list_tools =====
 
 type listToolsInput struct {
-	Server string `json:"server" jsonschema:"exact name of the MCP server, as returned by list_servers"`
+	Server string `json:"server,omitempty" jsonschema:"exact name of the MCP server, as returned by list_servers. Leave it out to list the tools of every connected server at once"`
 }
 
 // ToolSummary is a tool without its full schema, which is what a model
@@ -91,9 +111,30 @@ type ToolSummary struct {
 	Description string `json:"description,omitempty"`
 }
 
-type listToolsOutput struct {
+// serverTools is one server's tools, used when several servers are
+// reported at once.
+//
+// A separate type rather than [listToolsOutput] nesting itself: the SDK
+// infers this tool's output schema from these Go types, and a recursive
+// type infers a schema with references into its own definitions. There is
+// no reason to hand clients something that shaped when the nesting only
+// ever goes one level deep.
+type serverTools struct {
 	Server string        `json:"server"`
 	Tools  []ToolSummary `json:"tools"`
+}
+
+type listToolsOutput struct {
+	// Server is the one that was asked about, and is empty when every
+	// server was.
+	Server string `json:"server,omitempty"`
+
+	// Tools is the answer for a single server.
+	Tools []ToolSummary `json:"tools,omitempty"`
+
+	// Servers is the answer when no server was named: one entry each,
+	// rather than a flat list repeating the origin on every row.
+	Servers []serverTools `json:"servers,omitempty"`
 }
 
 // ===== get_tool =====
@@ -109,6 +150,10 @@ type getToolOutput struct {
 	Exposed     string `json:"exposed"`
 	Description string `json:"description,omitempty"`
 
+	// Title is the tool's display name, when it has one distinct from its
+	// name.
+	Title string `json:"title,omitempty"`
+
 	// InputSchema is a map rather than `any` because the SDK generates
 	// this tool's output schema from these field types, and `any` becomes
 	// the JSON Schema `true`.
@@ -119,6 +164,23 @@ type getToolOutput struct {
 	// response, not just this field, so a single `any` here makes every
 	// tool the gateway offers invisible to any client built on that SDK.
 	InputSchema map[string]any `json:"inputSchema,omitempty"`
+
+	// OutputSchema says what a successful call returns, when the upstream
+	// server declares one. A caller that knows it can expect structured
+	// content rather than guessing from the text.
+	//
+	// A map for the same reason as InputSchema, and passed through the same
+	// decoding, since it comes from the same arbitrary upstream JSON.
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
+
+	// Annotations are the upstream server's hints about what calling this
+	// tool does — read-only, destructive, idempotent, open-world.
+	//
+	// This is the field whose absence cost the most: a caller weighing
+	// whether a call is safe to make had nothing to weigh, while the same
+	// tool published through tools/list carried the hints in full. A tool
+	// reached through call_tool is no less in need of them.
+	Annotations *mcp.ToolAnnotations `json:"annotations,omitempty"`
 }
 
 // ===== call_tool =====
@@ -136,13 +198,19 @@ type callToolInput struct {
 // ===== search_tools =====
 
 type searchToolsInput struct {
-	Query string `json:"query" jsonschema:"words to look for in tool names and descriptions"`
+	Query string `json:"query" jsonschema:"words to look for in tool names and descriptions. Several words widen the search: describing one thing several ways is fine, and a word that matches nothing is reported rather than emptying the result"`
 	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of results, default 20"`
 }
 
 type searchToolsOutput struct {
 	Query string      `json:"query"`
 	Hits  []SearchHit `json:"hits"`
+
+	// Unmatched names the query terms no tool contained. It is absent when
+	// every term landed somewhere, so its presence is the signal: without
+	// it, an empty result is indistinguishable from "this gateway has no
+	// such capability".
+	Unmatched []string `json:"unmatched,omitempty"`
 }
 
 // defaultSearchLimit keeps a broad query from returning every tool in
@@ -189,8 +257,9 @@ func RegisterSystemTools(server *mcp.Server, ups Upstreams, cfgs Configs) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: ToolListTools,
-		Description: "List the tools one MCP server offers. Use the server name " +
-			"exactly as returned by list_servers.",
+		Description: "List the tools one MCP server offers, with their descriptions. " +
+			"Use the server name exactly as returned by list_servers, or leave it " +
+			"out to get every connected server in one call.",
 		Annotations: readOnly("List tools on a server"),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in listToolsInput) (*mcp.CallToolResult, listToolsOutput, error) {
 		out, err := listTools(ups, cfgs, in.Server)
@@ -234,7 +303,9 @@ func RegisterSystemTools(server *mcp.Server, ups Upstreams, cfgs Configs) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: ToolSearchTools,
 		Description: "Search for tools across every connected server by name and " +
-			"description. Every word must match.",
+			"description. Several words widen the search rather than narrowing it: " +
+			"a tool matching more of them ranks higher, and a word that matches " +
+			"nothing is reported back rather than emptying the result.",
 		Annotations: readOnly("Search tools"),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchToolsInput) (*mcp.CallToolResult, searchToolsOutput, error) {
 		return nil, searchTools(ups, cfgs, in), nil
@@ -283,9 +354,19 @@ func listServers(ups Upstreams, cfgs Configs) listServersOutput {
 			ResourceCount: status.ResourceCount,
 			Error:         status.Error,
 		}
+		if status.ServerName != status.Name {
+			summary.Title = status.ServerName
+		}
 		if server, ok := cfg.MCPServers[status.Name]; ok {
 			summary.Description = server.Description
 			summary.Tags = server.Tags
+		}
+		// Only a server that is actually up gets the invitation: telling a
+		// caller to run list_tools against a failed server sends it to an
+		// error, and for that server the state and the error are the
+		// description.
+		if summary.Description == "" && status.Connected() {
+			summary.Description = undescribedInList
 		}
 		out.Servers = append(out.Servers, summary)
 	}
@@ -294,30 +375,53 @@ func listServers(ups Upstreams, cfgs Configs) listServersOutput {
 
 func listTools(ups Upstreams, cfgs Configs, server string) (listToolsOutput, error) {
 	all := ups.Tools()
+	names := PublishedNames(all, cfgs.Get())
+
+	// No server named means every connected one. Understanding an
+	// installation otherwise costs one call per server — and the caller has
+	// to list the servers first just to know how many calls that is.
+	if server == "" {
+		out := listToolsOutput{Servers: []serverTools{}}
+		for _, status := range ups.Statuses() {
+			if !status.Connected() {
+				continue
+			}
+			out.Servers = append(out.Servers, serverTools{
+				Server: status.Name,
+				Tools:  summarize(all[status.Name], status.Name, names),
+			})
+		}
+		return out, nil
+	}
+
 	if err := requireServer(ups, server); err != nil {
 		return listToolsOutput{}, err
 	}
+	return listToolsOutput{Server: server, Tools: summarize(all[server], server, names)}, nil
+}
 
-	// Every tool the server offers is listed, exposed or not: this is how
-	// a model discovers what is available, and the whole point of exposing
-	// little is that discovery still reaches everything.
-	names := PublishedNames(all, cfgs.Get())
-	out := listToolsOutput{Server: server, Tools: []ToolSummary{}}
-	for _, tool := range all[server] {
+// summarize turns one server's tools into the reported form.
+//
+// Every tool the server offers is included, exposed or not: this is how a
+// model discovers what is available, and the whole point of exposing
+// little is that discovery still reaches everything.
+func summarize(tools []*mcp.Tool, server string, names NameMap) []ToolSummary {
+	out := make([]ToolSummary, 0, len(tools))
+	for _, tool := range tools {
 		if tool == nil || tool.Name == "" {
 			continue
 		}
 		exposed, _ := names.Exposed(server, tool.Name)
-		out.Tools = append(out.Tools, ToolSummary{
+		out = append(out, ToolSummary{
 			Name:        tool.Name,
 			Exposed:     exposed,
 			Description: tool.Description,
 		})
 	}
-	slices.SortFunc(out.Tools, func(a, b ToolSummary) int {
+	slices.SortFunc(out, func(a, b ToolSummary) int {
 		return compareStrings(a.Name, b.Name)
 	})
-	return out, nil
+	return out
 }
 
 func getTool(ups Upstreams, cfgs Configs, server, tool string) (getToolOutput, error) {
@@ -341,13 +445,25 @@ func getTool(ups Upstreams, cfgs Configs, server, tool string) (getToolOutput, e
 			schema = emptyObjectSchema()
 		}
 
-		return getToolOutput{
+		out := getToolOutput{
 			Server:      server,
 			Name:        candidate.Name,
 			Exposed:     exposed,
 			Description: candidate.Description,
+			Title:       candidate.Title,
 			InputSchema: schema,
-		}, nil
+			Annotations: candidate.Annotations,
+		}
+		// An output schema is optional upstream, so an unusable one is
+		// simply not reported — unlike the input schema, which a caller
+		// needs in order to build a call at all and therefore gets an empty
+		// object rather than nothing.
+		if candidate.OutputSchema != nil {
+			if declared, ok := decodeObjectSchema(candidate.OutputSchema); ok {
+				out.OutputSchema = declared
+			}
+		}
+		return out, nil
 	}
 	return getToolOutput{}, fmt.Errorf("server %q has no tool named %q", server, tool)
 }
@@ -398,7 +514,11 @@ func searchTools(ups Upstreams, cfgs Configs, in searchToolsInput) searchToolsOu
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	return searchToolsOutput{Query: in.Query, Hits: SearchTools(in.Query, candidates, limit)}
+	return searchToolsOutput{
+		Query:     in.Query,
+		Hits:      SearchTools(in.Query, candidates, limit),
+		Unmatched: UnmatchedTerms(in.Query, candidates),
+	}
 }
 
 func listTags(cfgs Configs, server string) (listTagsOutput, error) {

@@ -351,6 +351,81 @@ func TestListServers(t *testing.T) {
 	if broken.Error == "" {
 		t.Error("broken carries no error message")
 	}
+	// And it is not invited to run list_tools, which would only fail: for a
+	// server that is down, the state and the error are the description.
+	if broken.Description != "" {
+		t.Errorf("broken description = %q, want none for a server that is down", broken.Description)
+	}
+}
+
+// The configured name is a shorthand somebody chose for the file. When a
+// server calls itself something else, that is the more useful name for
+// deciding whether to look inside — and the handshake has already said it.
+func TestListServersReportsWhatAServerCallsItself(t *testing.T) {
+	ups := twoServers()
+	ups.statuses[0].ServerName = "the local filesystem server"
+	session := gatewayFixture(t, ups, twoServersConfig(t))
+
+	var out struct {
+		Servers []gateway.ServerSummary `json:"servers"`
+	}
+	structured(t, callSystemTool(t, session, gateway.ToolListServers, nil), &out)
+
+	for _, server := range out.Servers {
+		switch server.Name {
+		case "files":
+			if server.Title != "the local filesystem server" {
+				t.Errorf("files title = %q, want what the server called itself", server.Title)
+			}
+		case "broken":
+			// Nothing was learned from a server that never connected, and
+			// an empty title is not worth a field.
+			if server.Title != "" {
+				t.Errorf("broken title = %q, want none", server.Title)
+			}
+		}
+	}
+}
+
+// A server that calls itself exactly what it is configured as adds nothing
+// by saying so twice.
+func TestAServerThatAgreesWithItsConfiguredNameHasNoTitle(t *testing.T) {
+	ups := twoServers()
+	ups.statuses[0].ServerName = "files"
+	session := gatewayFixture(t, ups, twoServersConfig(t))
+
+	var out struct {
+		Servers []gateway.ServerSummary `json:"servers"`
+	}
+	structured(t, callSystemTool(t, session, gateway.ToolListServers, nil), &out)
+
+	for _, server := range out.Servers {
+		if server.Name == "files" && server.Title != "" {
+			t.Errorf("files title = %q, want it left out when it repeats the name", server.Title)
+		}
+	}
+}
+
+// Nobody has written a description for most servers, and a caller can fix
+// that — so the field says how instead of being empty.
+func TestAnUndescribedServerSaysHowToDescribeIt(t *testing.T) {
+	session := gatewayFixture(t, twoServers(), exposingEverything(t, twoServers()))
+
+	var out struct {
+		Servers []gateway.ServerSummary `json:"servers"`
+	}
+	structured(t, callSystemTool(t, session, gateway.ToolListServers, nil), &out)
+
+	for _, server := range out.Servers {
+		if server.Name != "files" {
+			continue
+		}
+		for _, want := range []string{gateway.ToolListTools, gateway.ToolUpdateServerDescription} {
+			if !strings.Contains(server.Description, want) {
+				t.Errorf("description %q does not mention %s", server.Description, want)
+			}
+		}
+	}
 }
 
 func TestListTools(t *testing.T) {
@@ -382,6 +457,42 @@ func TestListTools(t *testing.T) {
 	// must be empty rather than a name that was never registered.
 	if out.Tools[1].Exposed != "" {
 		t.Errorf("exposed = %q for an unexposed tool, want no name", out.Tools[1].Exposed)
+	}
+}
+
+// Naming no server answers for all of them. Otherwise understanding an
+// installation costs one call per server, and the caller has to list the
+// servers first just to know how many calls that will be.
+func TestListToolsWithNoServerCoversThemAll(t *testing.T) {
+	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
+
+	var out struct {
+		Server  string `json:"server"`
+		Servers []struct {
+			Server string                `json:"server"`
+			Tools  []gateway.ToolSummary `json:"tools"`
+		} `json:"servers"`
+	}
+	structured(t, callSystemTool(t, session, gateway.ToolListTools, map[string]any{}), &out)
+
+	if out.Server != "" {
+		t.Errorf("server = %q, want it empty when no server was asked about", out.Server)
+	}
+	// Only the connected one: a failed server has no tools to report, and
+	// listing it empty reads as "this server offers nothing".
+	if len(out.Servers) != 1 {
+		t.Fatalf("covered %d servers, want just the connected one: %+v", len(out.Servers), out.Servers)
+	}
+	if out.Servers[0].Server != "files" {
+		t.Errorf("covered %q, want files", out.Servers[0].Server)
+	}
+	if len(out.Servers[0].Tools) != 2 {
+		t.Errorf("files has %d tools, want 2: %+v", len(out.Servers[0].Tools), out.Servers[0].Tools)
+	}
+	// The same shape as the single-server answer, descriptions and all.
+	if out.Servers[0].Tools[0].Description != "read a file from disk" {
+		t.Errorf("description = %q, want the upstream tool's own",
+			out.Servers[0].Tools[0].Description)
 	}
 }
 

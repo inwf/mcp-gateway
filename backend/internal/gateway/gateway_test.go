@@ -153,6 +153,98 @@ func TestTheHandshakeExplainsEveryGatewayTool(t *testing.T) {
 	}
 }
 
+// A tool must not be described in less detail just because nobody exposed
+// it.
+//
+// An exposed tool travels into tools/list as a whole copy of what the
+// upstream published — annotations, title, output schema and all. An
+// unexposed one is only ever seen through get_tool, and get_tool used to
+// report the description and the input schema and drop the rest. So the
+// same tool answered two different questions depending on a setting that
+// has nothing to do with what it does: readOnlyHint, which is how a caller
+// judges whether a call is safe, was there or not there by accident.
+func TestGetToolReportsAsMuchAsTheToolListDoes(t *testing.T) {
+	rich := func() *fakeUpstreams {
+		return &fakeUpstreams{
+			statuses: []upstream.Status{{Name: "files", State: upstream.StateConnected, ToolCount: 1}},
+			tools: map[string][]*mcp.Tool{
+				"files": {{
+					Name:        "read",
+					Title:       "Read a file",
+					Description: "read a file from disk",
+					InputSchema: map[string]any{"type": "object"},
+					OutputSchema: map[string]any{
+						"type":       "object",
+						"properties": map[string]any{"text": map[string]any{"type": "string"}},
+					},
+					Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+				}},
+			},
+		}
+	}
+
+	// Exposed: the whole thing reaches tools/list, which is the standard
+	// the other path has to meet.
+	url, _ := gatewayOn(t, rich(), nil)
+	session := clientOn(t, url, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	listed, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	var forwarded *mcp.Tool
+	for _, tool := range listed.Tools {
+		if tool.Name == "files_read" {
+			forwarded = tool
+		}
+	}
+	if forwarded == nil {
+		t.Fatal("the exposed tool is not in the tool list")
+	}
+	if forwarded.Annotations == nil || !forwarded.Annotations.ReadOnlyHint {
+		t.Fatalf("the exposed tool lost its annotations: %+v", forwarded.Annotations)
+	}
+
+	// Unexposed: nothing about it is in the tool list, and get_tool is the
+	// only way to learn anything — so it has to be the whole thing.
+	hidden, _ := gatewayOn(t, rich(), func(o *gateway.Options) {
+		o.Configs = exposing(t, map[string][]string{"files": {}})
+	})
+	hiddenSession := clientOn(t, hidden, nil)
+
+	if names := listedToolNames(t, hiddenSession); slices.Contains(names, "files_read") {
+		t.Fatalf("the tool was meant to be unexposed, but %v", names)
+	}
+
+	var described struct {
+		Title        string               `json:"title"`
+		Exposed      string               `json:"exposed"`
+		InputSchema  map[string]any       `json:"inputSchema"`
+		OutputSchema map[string]any       `json:"outputSchema"`
+		Annotations  *mcp.ToolAnnotations `json:"annotations"`
+	}
+	structured(t, callSystemTool(t, hiddenSession, gateway.ToolGetTool,
+		map[string]any{"server": "files", "tool": "read"}), &described)
+
+	if described.Exposed != "" {
+		t.Errorf("exposed = %q, want none for a tool nobody exposed", described.Exposed)
+	}
+	if described.Annotations == nil || !described.Annotations.ReadOnlyHint {
+		t.Errorf("annotations = %+v, want the upstream server's own", described.Annotations)
+	}
+	if described.Title != "Read a file" {
+		t.Errorf("title = %q, want the upstream server's own", described.Title)
+	}
+	if described.OutputSchema == nil {
+		t.Error("the output schema was dropped, so a caller cannot know what a call returns")
+	}
+	if described.InputSchema == nil {
+		t.Error("the input schema was dropped")
+	}
+}
+
 func TestGatewayForwardsAToolCall(t *testing.T) {
 	ups := twoServers()
 	url, _ := gatewayOn(t, ups, nil)

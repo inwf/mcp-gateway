@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"slices"
 	"testing"
 
 	"mcphub/internal/gateway"
@@ -70,16 +71,61 @@ func TestSearchMatchesDescriptions(t *testing.T) {
 	}
 }
 
-// A second word is meant to narrow the result, not widen it.
-func TestEveryTermMustMatch(t *testing.T) {
-	both := gateway.SearchTools("file disk", candidates(), 0)
-	if len(both) != 2 {
-		t.Errorf("SearchTools(\"file disk\") = %v, want the two file tools", hitNames(both))
+// Several words describing one thing must not behave like a filter.
+//
+// The query that prompted this was "horoscope zodiac astrology
+// constellation" against a server whose tool is called
+// get_daily_horoscope: four words for one idea, one of which matched
+// exactly. Requiring all four answered "there is no such tool", and the
+// caller believed it.
+func TestMoreTermsMatchedRanksHigher(t *testing.T) {
+	hits := gateway.SearchTools("file disk", candidates(), 0)
+
+	if len(hits) < 2 {
+		t.Fatalf("SearchTools(\"file disk\") = %v, want at least the two file tools", hitNames(hits))
+	}
+	if hits[0].Matched != 2 {
+		t.Errorf("top hit %q matched %d terms, want both", hits[0].Exposed, hits[0].Matched)
+	}
+	for i := 1; i < len(hits); i++ {
+		if hits[i-1].Matched < hits[i].Matched {
+			t.Errorf("hit %d matched %d terms, above hit %d which matched %d",
+				i-1, hits[i-1].Matched, i, hits[i].Matched)
+		}
+	}
+}
+
+func TestATermThatMatchesNothingDoesNotEraseTheOthers(t *testing.T) {
+	hits := gateway.SearchTools("file kubernetes", candidates(), 0)
+
+	if len(hits) == 0 {
+		t.Fatal("one word matching nothing threw away the word that matched")
+	}
+	for _, hit := range hits {
+		if hit.Matched != 1 {
+			t.Errorf("hit %q matched %d terms, want just the one", hit.Exposed, hit.Matched)
+		}
+	}
+}
+
+// The other half of the answer: which words found nothing. Without it, a
+// thin result cannot be told apart from a gateway that lacks the
+// capability — and the caller has no way to guess which word to drop.
+func TestTermsThatMatchedNothingAreNamed(t *testing.T) {
+	got := gateway.UnmatchedTerms("file Kubernetes helm", candidates())
+
+	// Reported as the caller wrote them, capital and all: it has to
+	// recognise its own word to drop it.
+	want := []string{"Kubernetes", "helm"}
+	if !slices.Equal(got, want) {
+		t.Errorf("UnmatchedTerms = %v, want %v", got, want)
 	}
 
-	none := gateway.SearchTools("file kubernetes", candidates(), 0)
-	if len(none) != 0 {
-		t.Errorf("SearchTools(\"file kubernetes\") = %v, want nothing", hitNames(none))
+	if got := gateway.UnmatchedTerms("file disk", candidates()); len(got) != 0 {
+		t.Errorf("UnmatchedTerms = %v, want nothing when every word landed", got)
+	}
+	if got := gateway.UnmatchedTerms("", candidates()); len(got) != 0 {
+		t.Errorf("UnmatchedTerms of a blank query = %v, want nothing", got)
 	}
 }
 
@@ -148,13 +194,22 @@ func TestSearchOrderIsStable(t *testing.T) {
 	}
 }
 
-func TestScoresDescend(t *testing.T) {
+// Relevance is the pair, in that order: how much of the query a tool
+// answered, then where it answered it. A tool matching two words from
+// their descriptions belongs above one matching a single word exactly,
+// which is why score alone is not the contract.
+func TestHitsAreOrderedByRelevance(t *testing.T) {
 	hits := gateway.SearchTools("read file", candidates(), 0)
 
 	for i := 1; i < len(hits); i++ {
-		if hits[i-1].Score < hits[i].Score {
-			t.Errorf("hit %d scores %d, below hit %d at %d",
-				i-1, hits[i-1].Score, i, hits[i].Score)
+		before, after := hits[i-1], hits[i]
+		if before.Matched < after.Matched {
+			t.Errorf("hit %d matched %d terms, above hit %d which matched %d",
+				i-1, before.Matched, i, after.Matched)
+		}
+		if before.Matched == after.Matched && before.Score < after.Score {
+			t.Errorf("hit %d scores %d, above hit %d at %d on the same term count",
+				i-1, before.Score, i, after.Score)
 		}
 	}
 }

@@ -21,7 +21,14 @@ type SearchHit struct {
 	Tool        string `json:"tool"`
 	Exposed     string `json:"exposed"`
 	Description string `json:"description,omitempty"`
-	Score       int    `json:"score"`
+
+	// Matched is how many of the query's terms this tool matched. It is
+	// reported because it is the first thing the ranking goes on, so a
+	// caller can see why one hit came above another — and can tell a tool
+	// that answered the whole question from one that answered a word of it.
+	Matched int `json:"matched"`
+
+	Score int `json:"score"`
 }
 
 // Searchable is one candidate offered to [SearchTools].
@@ -34,20 +41,25 @@ type Searchable struct {
 
 // SearchTools ranks candidates against a query.
 //
-// Every whitespace-separated term must appear somewhere in the tool name
-// or its description; terms narrow the result rather than widening it,
-// which is what someone typing a second word expects. Matching is
-// case-insensitive.
+// A tool matching more of the query's terms outranks one matching fewer,
+// and within an equal count the placement of those terms decides. A term
+// that matches nothing does not erase the terms that did: someone
+// describing what they want in several words ("horoscope zodiac astrology")
+// is naming one thing several ways, not narrowing a filter, and requiring
+// all of them turns a good query into no answer at all. Which terms found
+// nothing is worth knowing separately — see [UnmatchedTerms].
 //
-// A blank query matches everything, so that a caller can page through
-// the full list with the same call.
+// Matching is case-insensitive. A blank query matches everything, so that
+// a caller can page through the full list with the same call.
 func SearchTools(query string, candidates []Searchable, limit int) []SearchHit {
-	terms := strings.Fields(strings.ToLower(query))
+	terms := lowerTerms(query)
 
 	hits := make([]SearchHit, 0, len(candidates))
 	for _, candidate := range candidates {
-		score, ok := scoreCandidate(terms, candidate)
-		if !ok {
+		matched, score := scoreCandidate(terms, candidate)
+		// A query with no terms asks for everything; one with terms asks
+		// for the tools that answered at least one of them.
+		if len(terms) > 0 && matched == 0 {
 			continue
 		}
 		hits = append(hits, SearchHit{
@@ -55,17 +67,26 @@ func SearchTools(query string, candidates []Searchable, limit int) []SearchHit {
 			Tool:        candidate.Tool,
 			Exposed:     candidate.Exposed,
 			Description: candidate.Description,
+			Matched:     matched,
 			Score:       score,
 		})
 	}
 
-	// Ties break on name so that repeating a search gives the same
-	// order.
+	// Ties break on the origin rather than on the exposed name, which is
+	// empty for every tool an installation has not exposed — and that is
+	// most of them. Sorting on a field that is usually blank leaves the
+	// order to chance.
 	slices.SortFunc(hits, func(a, b SearchHit) int {
+		if a.Matched != b.Matched {
+			return b.Matched - a.Matched
+		}
 		if a.Score != b.Score {
 			return b.Score - a.Score
 		}
-		return strings.Compare(a.Exposed, b.Exposed)
+		if origin := strings.Compare(a.Server, b.Server); origin != 0 {
+			return origin
+		}
+		return strings.Compare(a.Tool, b.Tool)
 	})
 
 	if limit > 0 && len(hits) > limit {
@@ -74,42 +95,81 @@ func SearchTools(query string, candidates []Searchable, limit int) []SearchHit {
 	return hits
 }
 
-// scoreCandidate returns the total score, and whether every term matched.
-func scoreCandidate(terms []string, candidate Searchable) (int, bool) {
-	if len(terms) == 0 {
-		return 0, true
-	}
+// UnmatchedTerms returns the query terms that appear in no candidate at
+// all, spelled as the caller wrote them.
+//
+// It exists so that an empty or thin result can say why. "No hits" reads
+// as "this gateway cannot do that", which is a conclusion a caller should
+// not reach because it used a word this installation does not use. Naming
+// the words that found nothing turns a dead end into a next attempt.
+func UnmatchedTerms(query string, candidates []Searchable) []string {
+	words := strings.Fields(query)
+	terms := lowerTerms(query)
 
-	name := strings.ToLower(candidate.Tool)
-	exposed := strings.ToLower(candidate.Exposed)
-	description := strings.ToLower(candidate.Description)
-
-	total := 0
-	for _, term := range terms {
-		score := bestPlacement(term, name, exposed, description)
-		if score == 0 {
-			return 0, false
+	unmatched := make([]string, 0)
+	for i, term := range terms {
+		if !slices.ContainsFunc(candidates, func(candidate Searchable) bool {
+			return bestPlacement(term, placesIn(candidate)) > 0
+		}) {
+			unmatched = append(unmatched, words[i])
 		}
-		total += score
 	}
-	return total, true
+	return unmatched
+}
+
+func lowerTerms(query string) []string {
+	words := strings.Fields(query)
+	terms := make([]string, len(words))
+	for i, word := range words {
+		terms[i] = strings.ToLower(word)
+	}
+	return terms
+}
+
+// places are the three fields of a candidate a term can be found in,
+// lowered once so that a query of several terms does not lower them again
+// for each one.
+type places struct {
+	name        string
+	exposed     string
+	description string
+}
+
+func placesIn(candidate Searchable) places {
+	return places{
+		name:        strings.ToLower(candidate.Tool),
+		exposed:     strings.ToLower(candidate.Exposed),
+		description: strings.ToLower(candidate.Description),
+	}
+}
+
+// scoreCandidate returns how many terms matched and their total score.
+func scoreCandidate(terms []string, candidate Searchable) (matched, score int) {
+	where := placesIn(candidate)
+	for _, term := range terms {
+		if placement := bestPlacement(term, where); placement > 0 {
+			matched++
+			score += placement
+		}
+	}
+	return matched, score
 }
 
 // bestPlacement scores the most significant place a term appears, or
 // zero if it appears nowhere.
-func bestPlacement(term, name, exposed, description string) int {
+func bestPlacement(term string, where places) int {
 	switch {
-	case term == name:
+	case term == where.name:
 		return scoreExactName
-	case strings.HasPrefix(name, term):
+	case strings.HasPrefix(where.name, term):
 		return scoreNamePrefix
-	case strings.Contains(name, term):
+	case strings.Contains(where.name, term):
 		return scoreNameContains
 	// The exposed name carries the server, so searching by server name
 	// finds that server's tools.
-	case strings.Contains(exposed, term):
+	case strings.Contains(where.exposed, term):
 		return scoreNameContains
-	case strings.Contains(description, term):
+	case strings.Contains(where.description, term):
 		return scoreDescContains
 	default:
 		return 0

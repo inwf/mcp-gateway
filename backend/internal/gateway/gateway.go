@@ -54,7 +54,7 @@ type Options struct {
 // last version of this text drifted into naming three tools out of seven.
 const instructions = `This gateway proxies several MCP servers. Its tool list holds the gateway's own tools only; the tools of the proxied servers are reached through them.
 
-To find a tool: list_servers for what is behind the gateway, list_tools for what one server offers, search_tools to look across every server by name and description, get_tool for one tool's full input schema. list_tags shows how servers are grouped, and update_server_description records what a server is for once you have worked it out. Reading the resource hub://servers/{name} gives one server's whole tool list, with descriptions, in a single call.
+To find a tool: list_servers for what is behind the gateway, list_tools for what one server offers — or for every server at once if you name none, search_tools to look across every server by name and description, get_tool for one tool's full input schema. list_tags shows how servers are grouped, and update_server_description records what a server is for once you have worked it out. Reading the resource hub://servers/{name} gives one server's whole tool list, with descriptions, in a single call.
 
 To run one: call_tool(server, tool, args). That is the only way to run a proxied tool, and most of them are deliberately kept out of the tool list to keep it short — a tool being absent from that list says nothing about whether it can be called. A proxied tool that does appear in it, under a name like "files_read", can also be called directly by that name.
 
@@ -409,20 +409,13 @@ type serverDescription struct {
 	Tools map[string]string `json:"tools,omitempty"`
 }
 
-// undescribed is what a server with no recorded description says instead.
-// It is phrased as an invitation because the caller can act on it: the
-// tools are right there in the same document, and one call saves what it
-// concludes for everyone who reads this next.
-const undescribed = "no description has been recorded for this server; " +
-	"its tools are listed below, and update_server_description saves a description for it"
-
 func (g *Gateway) describeServer(server, uri string) (*mcp.ReadResourceResult, error) {
 	for _, status := range g.opts.Upstreams.Statuses() {
 		if status.Name != server {
 			continue
 		}
 
-		described := serverDescription{Status: status, Description: undescribed}
+		described := serverDescription{Status: status, Description: undescribedInResource}
 		if entry, ok := g.opts.Configs.Get().MCPServers[server]; ok {
 			if entry.Description != "" {
 				described.Description = entry.Description
