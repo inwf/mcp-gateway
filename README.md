@@ -49,6 +49,7 @@ mcphub servers list
 ```
 
 完整用法：`mcphub guide`。配置字段：[docs/configuration.md](docs/configuration.md)。
+网关对模型说了什么：[docs/mcp-surface.md](docs/mcp-surface.md)。
 
 ## 有什么
 
@@ -120,6 +121,7 @@ frontend/
     test/            测试夹具
 docs/
   configuration.md   配置字段参考
+  mcp-surface.md     网关对 MCP 客户端的自述
 ```
 
 ## 技术选型

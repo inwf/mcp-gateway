@@ -87,7 +87,10 @@ func gatewayFixture(t *testing.T, ups gateway.Upstreams, cfgs gateway.Configs) *
 	t.Helper()
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "mcphub", Version: "test"}, nil)
-	gateway.RegisterSystemTools(server, ups, cfgs)
+	// Nil own-tools: this fixture registers the tools on a bare server it
+	// does not own, so there is nothing to read them back off. Self
+	// description is a whole-gateway behaviour and is tested against one.
+	gateway.RegisterSystemTools(server, ups, cfgs, nil)
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 
@@ -457,42 +460,6 @@ func TestListTools(t *testing.T) {
 	// must be empty rather than a name that was never registered.
 	if out.Tools[1].Exposed != "" {
 		t.Errorf("exposed = %q for an unexposed tool, want no name", out.Tools[1].Exposed)
-	}
-}
-
-// Naming no server answers for all of them. Otherwise understanding an
-// installation costs one call per server, and the caller has to list the
-// servers first just to know how many calls that will be.
-func TestListToolsWithNoServerCoversThemAll(t *testing.T) {
-	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
-
-	var out struct {
-		Server  string `json:"server"`
-		Servers []struct {
-			Server string                `json:"server"`
-			Tools  []gateway.ToolSummary `json:"tools"`
-		} `json:"servers"`
-	}
-	structured(t, callSystemTool(t, session, gateway.ToolListTools, map[string]any{}), &out)
-
-	if out.Server != "" {
-		t.Errorf("server = %q, want it empty when no server was asked about", out.Server)
-	}
-	// Only the connected one: a failed server has no tools to report, and
-	// listing it empty reads as "this server offers nothing".
-	if len(out.Servers) != 1 {
-		t.Fatalf("covered %d servers, want just the connected one: %+v", len(out.Servers), out.Servers)
-	}
-	if out.Servers[0].Server != "files" {
-		t.Errorf("covered %q, want files", out.Servers[0].Server)
-	}
-	if len(out.Servers[0].Tools) != 2 {
-		t.Errorf("files has %d tools, want 2: %+v", len(out.Servers[0].Tools), out.Servers[0].Tools)
-	}
-	// The same shape as the single-server answer, descriptions and all.
-	if out.Servers[0].Tools[0].Description != "read a file from disk" {
-		t.Errorf("description = %q, want the upstream tool's own",
-			out.Servers[0].Tools[0].Description)
 	}
 }
 

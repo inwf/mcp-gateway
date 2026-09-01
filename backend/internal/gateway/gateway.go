@@ -54,11 +54,11 @@ type Options struct {
 // last version of this text drifted into naming three tools out of seven.
 const instructions = `This gateway proxies several MCP servers. Its tool list holds the gateway's own tools only; the tools of the proxied servers are reached through them.
 
-To find a tool: list_servers for what is behind the gateway, list_tools for what one server offers — or for every server at once if you name none, search_tools to look across every server by name and description, get_tool for one tool's full input schema. list_tags shows how servers are grouped, and update_server_description records what a server is for once you have worked it out. Reading the resource hub://servers/{name} gives one server's whole tool list, with descriptions, in a single call.
+To find a tool: list_servers for what is behind the gateway, list_tools for what one server offers, search_tools to look across every server by name and description, get_tool for one tool's full input schema. list_tags shows how servers are grouped, and update_server_description records what a server is for once you have worked it out. Reading the resource hub://servers/{name} gives one server's whole tool list, with descriptions, in a single call.
 
 To run one: call_tool(server, tool, args). That is the only way to run a proxied tool, and most of them are deliberately kept out of the tool list to keep it short — a tool being absent from that list says nothing about whether it can be called. A proxied tool that does appear in it, under a name like "files_read", can also be called directly by that name.
 
-The gateway's own tools — list_servers, list_tools, get_tool, call_tool, search_tools, list_tags, update_server_description — are called directly, never through call_tool.
+The gateway's own tools — list_servers, list_tools, get_tool, call_tool, search_tools, list_tags, update_server_description — are called directly, never through call_tool. Their own schemas come from get_tool with the server name "mcphub", which is this gateway.
 
 The resource hub://guide is the longer version of all of this.`
 
@@ -120,7 +120,7 @@ func New(opts Options) *Gateway {
 
 	g.server = mcp.NewServer(
 		&mcp.Implementation{
-			Name:    "mcphub",
+			Name:    Name,
 			Version: opts.Version,
 			Title:   "MCP Hub",
 		},
@@ -137,7 +137,14 @@ func New(opts Options) *Gateway {
 			HasResources: true,
 		})
 
-	RegisterSystemTools(g.server, opts.Upstreams, opts.Configs)
+	RegisterSystemTools(g.server, opts.Upstreams, opts.Configs, g.SystemTools)
+
+	// Read the gateway's own tools back now rather than on the first call
+	// that wants them. That read talks to this server over a pipe, and the
+	// first caller to want it would be a request handler already running on
+	// it — one round trip taken here is one that never happens from inside a
+	// handler.
+	g.SystemTools()
 
 	if opts.WireDebug {
 		g.installWireLogging()

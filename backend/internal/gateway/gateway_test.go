@@ -157,12 +157,15 @@ func TestTheHandshakeExplainsEveryGatewayTool(t *testing.T) {
 // it.
 //
 // An exposed tool travels into tools/list as a whole copy of what the
-// upstream published — annotations, title, output schema and all. An
-// unexposed one is only ever seen through get_tool, and get_tool used to
-// report the description and the input schema and drop the rest. So the
-// same tool answered two different questions depending on a setting that
-// has nothing to do with what it does: readOnlyHint, which is how a caller
-// judges whether a call is safe, was there or not there by accident.
+// upstream published, annotations included. An unexposed one is only ever
+// seen through get_tool, and get_tool used to report the description and the
+// input schema and drop the rest. So the same tool answered two different
+// questions depending on a setting that has nothing to do with what it does:
+// readOnlyHint, which is how a caller judges whether a call is safe, was
+// there or not there by accident.
+//
+// The output schema is the deliberate exception — see the bottom of this
+// test and getToolOutput for why.
 func TestGetToolReportsAsMuchAsTheToolListDoes(t *testing.T) {
 	rich := func() *fakeUpstreams {
 		return &fakeUpstreams{
@@ -225,6 +228,7 @@ func TestGetToolReportsAsMuchAsTheToolListDoes(t *testing.T) {
 		OutputSchema map[string]any       `json:"outputSchema"`
 		Annotations  *mcp.ToolAnnotations `json:"annotations"`
 	}
+
 	structured(t, callSystemTool(t, hiddenSession, gateway.ToolGetTool,
 		map[string]any{"server": "files", "tool": "read"}), &described)
 
@@ -237,12 +241,183 @@ func TestGetToolReportsAsMuchAsTheToolListDoes(t *testing.T) {
 	if described.Title != "Read a file" {
 		t.Errorf("title = %q, want the upstream server's own", described.Title)
 	}
-	if described.OutputSchema == nil {
-		t.Error("the output schema was dropped, so a caller cannot know what a call returns")
+	// The output schema is deliberately not reported, even though the
+	// gateway holds it: see getToolOutput for the measurement behind that.
+	// Asserted so that adding it back has to be a decision rather than a
+	// tidy-up.
+	if described.OutputSchema != nil {
+		t.Errorf("outputSchema = %v, want it left out", described.OutputSchema)
 	}
 	if described.InputSchema == nil {
 		t.Error("the input schema was dropped")
 	}
+}
+
+// The gateway answers about itself under its own name.
+//
+// A caller that wants call_tool's schema has to name a server, and the only
+// server it can name is this one. The old project made this a convention
+// across its whole codebase; dropping it left the one question a new client
+// always asks with no way to be asked.
+func TestTheGatewayDescribesItsOwnTools(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	var listed struct {
+		Server string                `json:"server"`
+		Tools  []gateway.ToolSummary `json:"tools"`
+	}
+	structured(t, callSystemTool(t, session, gateway.ToolListTools,
+		map[string]any{"server": gateway.Name}), &listed)
+
+	if listed.Server != gateway.Name {
+		t.Errorf("server = %q, want %q", listed.Server, gateway.Name)
+	}
+	if len(listed.Tools) != len(gateway.SystemToolNames) {
+		t.Fatalf("listed %d of its own tools, want all %d: %+v",
+			len(listed.Tools), len(gateway.SystemToolNames), listed.Tools)
+	}
+	for _, tool := range listed.Tools {
+		if !gateway.IsSystemTool(tool.Name) {
+			t.Errorf("%q is not one of the gateway's tools", tool.Name)
+		}
+		// These are in tools/list under their own name, and that is how they
+		// are called — so that is what they are exposed as.
+		if tool.Exposed != tool.Name {
+			t.Errorf("%q is exposed as %q, want its own name", tool.Name, tool.Exposed)
+		}
+		if tool.Description == "" {
+			t.Errorf("%q has no description", tool.Name)
+		}
+	}
+}
+
+// The schema has to be the real one. A hand-written copy would describe the
+// Go handlers as they were on the day somebody typed it, so this compares
+// the two paths a client can reach the same schema by.
+func TestTheGatewaysOwnSchemaMatchesTheOneItPublishes(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	listed, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	published := map[string]*mcp.Tool{}
+	for _, tool := range listed.Tools {
+		published[tool.Name] = tool
+	}
+
+	for _, name := range gateway.SystemToolNames {
+		var described struct {
+			Server      string         `json:"server"`
+			Name        string         `json:"name"`
+			InputSchema map[string]any `json:"inputSchema"`
+		}
+		structured(t, callSystemTool(t, session, gateway.ToolGetTool,
+			map[string]any{"server": gateway.Name, "tool": name}), &described)
+
+		if described.Name != name {
+			t.Errorf("get_tool(%s) named %q", name, described.Name)
+		}
+		want, ok := published[name]
+		if !ok {
+			t.Fatalf("%q is not in the published tool list", name)
+		}
+		if !sameJSON(t, described.InputSchema, want.InputSchema) {
+			t.Errorf("%s: get_tool reports a different input schema than tools/list\n get_tool:  %s\n tools/list: %s",
+				name, mustJSON(t, described.InputSchema), mustJSON(t, want.InputSchema))
+		}
+	}
+}
+
+func TestAskingTheGatewayForAToolItDoesNotHave(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	result := callSystemTool(t, session, gateway.ToolGetTool,
+		map[string]any{"server": gateway.Name, "tool": "teleport"})
+
+	if !result.IsError {
+		t.Fatal("asking the gateway for a tool it does not have succeeded")
+	}
+	// And it says what it does have, since the caller is clearly looking for
+	// one of them.
+	if text := resultText(result); !strings.Contains(text, gateway.ToolCallTool) {
+		t.Errorf("error %q does not name the gateway's own tools", text)
+	}
+}
+
+// It is a name list_tools and get_tool accept, so it is a name a caller
+// will try here too — and "no server named mcphub" would be a strange thing
+// to hear from mcphub.
+func TestTheGatewayCannotBeGivenADescription(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	result := callSystemTool(t, session, gateway.ToolUpdateServerDescription,
+		map[string]any{"server": gateway.Name, "description": "the gateway itself"})
+
+	if !result.IsError {
+		t.Fatal("the gateway accepted a description of itself")
+	}
+	text := resultText(result)
+	if strings.Contains(text, "no server named") {
+		t.Errorf("error %q denies that the gateway exists", text)
+	}
+	if !strings.Contains(text, "itself") {
+		t.Errorf("error %q does not explain what the gateway is", text)
+	}
+	// And it answers the question that was asked. The generic "mcphub is
+	// this gateway" reply talks about tools, which is not what a caller
+	// trying to record a description wanted to know.
+	if !strings.Contains(text, "description") {
+		t.Errorf("error %q never mentions the description it was asked to save", text)
+	}
+}
+
+// The gateway is not one of the servers it proxies, and counting it among
+// them would make "how many servers are behind this" wrong.
+func TestTheGatewayIsNotListedAmongTheServers(t *testing.T) {
+	url, _ := gatewayOn(t, twoServers(), nil)
+	session := clientOn(t, url, nil)
+
+	var out struct {
+		Servers []gateway.ServerSummary `json:"servers"`
+	}
+	structured(t, callSystemTool(t, session, gateway.ToolListServers, nil), &out)
+
+	for _, server := range out.Servers {
+		if server.Name == gateway.Name {
+			t.Errorf("the gateway lists itself as one of its own upstream servers")
+		}
+	}
+}
+
+func sameJSON(t *testing.T, a, b any) bool {
+	t.Helper()
+	return mustJSON(t, a) == mustJSON(t, b)
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	// Round-tripped through a map so that key order cannot make two equal
+	// schemas compare unequal.
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var normalized any
+	if err := json.Unmarshal(encoded, &normalized); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	again, err := json.Marshal(normalized)
+	if err != nil {
+		t.Fatalf("marshal again: %v", err)
+	}
+	return string(again)
 }
 
 func TestGatewayForwardsAToolCall(t *testing.T) {

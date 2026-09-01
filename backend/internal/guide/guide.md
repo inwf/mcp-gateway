@@ -130,9 +130,9 @@ mcphub servers list
 | 工具                         | 用途                                       |
 | ---------------------------- | ------------------------------------------ |
 | `list_servers`               | 有哪些服务器，各自是什么状态                |
-| `list_tools`                 | 某台服务器提供哪些工具（只给名字和简介）    |
+| `list_tools`                 | 某台服务器提供哪些工具（名字 + 一行描述）    |
 | `search_tools`               | 按关键词跨全部服务器搜工具                  |
-| `get_tool`                   | 取某个工具的完整输入 schema                 |
+| `get_tool`                   | 取某个工具的完整输入 schema 与 annotations   |
 | `call_tool`                  | 按服务器名 + 工具名调用                     |
 | `list_tags`                  | 列出标签，用于按用途筛选服务器              |
 | `update_server_description`  | 改写某台服务器的描述                        |
@@ -140,6 +140,29 @@ mcphub servers list
 典型用法是三步：`search_tools` 找到候选 → `get_tool` 取 schema →
 `call_tool` 调用。已经暴露出来的工具可以直接按 `files_read` 这样的名字调，
 不必绕 `call_tool`；没暴露的就走这三步，`call_tool` 对两者都管用。
+
+**一个工具没出现在 `tools/list` 里，不代表它调不了。** 默认一个上游工具都不
+暴露，这是有意的（见上文的 `exposedTools`）；未暴露的工具照样能被
+`list_tools` / `search_tools` 发现，也照样能用 `call_tool` 调。
+
+`search_tools` 的多个词是**放宽**而不是收紧：命中词多的排在前面，某个词在所有
+工具里都没出现时会单独报在 `unmatched` 里，而不是把结果清空。所以拿同一件事的
+几种说法一起查是可以的。
+
+**问网关它自己**：`list_tools` 与 `get_tool` 都接受服务器名 `mcphub`，
+返回的就是这七个工具本身——
+
+```
+list_tools(server="mcphub")              这七个工具都有哪些
+get_tool(server="mcphub", tool="call_tool")   call_tool 自己要什么参数
+```
+
+其它系统工具不需要服务器名，直接调即可；`update_server_description` 对
+`mcphub` 会明确拒绝，因为网关自己不是被代理的服务器。
+
+除了工具，还有两份资源值得先读：`hub://guide` 是本文，
+`hub://servers/{名字}` 是某台服务器的状态加它全部工具的「名字 → 描述」——
+一次读取就能看完一台服务器，不必逐个 `get_tool`。
 
 这七个工具在 CLI 和 Web 界面里都单独成组，也可以直接调用：
 
