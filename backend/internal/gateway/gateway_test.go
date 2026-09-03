@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -1070,26 +1071,103 @@ func TestSessionsAreReported(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// One connecting client can leave more than one session behind: the
-	// SDK client offers the newest protocol version first and starts
-	// over at an older one if the server negotiates down, abandoning the
-	// first session. Abandoned sessions are reaped by the session
-	// timeout, so what matters here is that the client is identified,
-	// not how many entries it produced.
-	if len(sessions) == 0 {
-		t.Fatal("no session was recorded after a client connected")
+	// One client is one session.
+	//
+	// It used not to be. The SDK client tries the modern server/discover
+	// handshake first and, finding no version overlap, abandons that session
+	// and starts again with the legacy initialize on a fresh one. Nothing
+	// closes the abandoned session, so for the next half hour the list said
+	// two clients were connected — same name, same everything, two rows.
+	if len(sessions) != 1 {
+		t.Fatalf("one client produced %d sessions, want 1: %+v", len(sessions), sessions)
 	}
-	for _, session := range sessions {
-		if session.ID == "" {
-			t.Errorf("session %+v has no id", session)
-		}
-		if session.ClientName != "probe" {
-			t.Errorf("clientName = %q, want probe", session.ClientName)
-		}
-		if session.ProtocolVersion == "" {
-			t.Errorf("session %s records no protocol version", session.ID)
-		}
+	session := sessions[0]
+	if session.ID == "" {
+		t.Errorf("session %+v has no id", session)
 	}
+	if session.ClientName != "probe" {
+		t.Errorf("clientName = %q, want probe", session.ClientName)
+	}
+	if session.ProtocolVersion == "" {
+		t.Error("the session records no protocol version")
+	}
+}
+
+// The handshake alone does not make a client, and a client that skips the
+// initialized notification is still a client.
+//
+// Both halves matter. Counting a session as soon as it says initialize is
+// what produced the doubled list. Counting it only on
+// notifications/initialized would trust every client to send one — the spec
+// requires it, which is not the same as it arriving.
+func TestASessionCountsOnceItIsUsedForSomething(t *testing.T) {
+	url, g := gatewayOn(t, twoServers(), nil)
+
+	id := rawInitialize(t, url)
+	if got := g.Sessions(); len(got) != 0 {
+		t.Errorf("Sessions = %+v after nothing but a handshake, want none", got)
+	}
+
+	// No notifications/initialized — straight to work, as a client that
+	// does not implement that notification would.
+	rawPost(t, url, id, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+
+	sessions := g.Sessions()
+	if len(sessions) != 1 {
+		t.Fatalf("Sessions = %+v after the session was used, want one", sessions)
+	}
+	if sessions[0].ID != id {
+		t.Errorf("reported session %q, want %q", sessions[0].ID, id)
+	}
+}
+
+// rawInitialize performs the initialize half of the handshake by hand and
+// returns the session id the server assigned, so that a test can control
+// exactly what a client does and does not send.
+func rawInitialize(t *testing.T, url string) string {
+	t.Helper()
+
+	response := rawPost(t, url, "",
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{`+
+			`"protocolVersion":"2025-06-18","capabilities":{},`+
+			`"clientInfo":{"name":"handmade","version":"1.0"}}}`)
+	defer response.Body.Close()
+
+	id := response.Header.Get("Mcp-Session-Id")
+	if id == "" {
+		t.Fatal("the server assigned no session id")
+	}
+	return id
+}
+
+func rawPost(t *testing.T, url, session, body string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build the request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if session != "" {
+		req.Header.Set("Mcp-Session-Id", session)
+	}
+
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post to the gateway: %v", err)
+	}
+	t.Cleanup(func() { response.Body.Close() })
+
+	if response.StatusCode >= 400 {
+		t.Fatalf("the gateway answered %s", response.Status)
+	}
+	// Read the body out so that the server finishes handling the message
+	// before the test looks at what it recorded.
+	if _, err := io.ReadAll(response.Body); err != nil {
+		t.Fatalf("read the response: %v", err)
+	}
+	return response
 }
 
 // Sessions are ordered so a list in the UI does not reshuffle.

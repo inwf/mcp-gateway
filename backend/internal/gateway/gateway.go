@@ -96,9 +96,10 @@ type Gateway struct {
 	systemToolsOnce sync.Once
 	systemTools     []*mcp.Tool
 
-	// internal tracks the sessions the gateway opens to its own server,
-	// so that they stay out of the reported session list.
-	internal internalSessions
+	// internal tracks what the gateway knows about its own sessions that
+	// the SDK does not report: which are the gateway talking to itself, and
+	// which a client is actually using.
+	internal sessionLedger
 
 	resync *debouncer
 }
@@ -138,6 +139,11 @@ func New(opts Options) *Gateway {
 		})
 
 	RegisterSystemTools(g.server, opts.Upstreams, opts.Configs, g.SystemTools)
+
+	// Installed before anything can connect: a session that arrives before
+	// the middleware is in place would never be marked, and so would never
+	// be reported as a client.
+	g.trackSessions()
 
 	// Read the gateway's own tools back now rather than on the first call
 	// that wants them. That read talks to this server over a pipe, and the
@@ -183,9 +189,11 @@ func (g *Gateway) Handler() http.Handler {
 	})
 }
 
-// Sessions lists the clients currently connected. The gateway's own
-// sessions to itself are not clients and are left out; see
-// [internalSessions].
+// Sessions lists the clients currently connected.
+//
+// Two kinds of session are left out, both for the same reason — they are
+// not somebody connected: the gateway's own sessions to itself, and
+// sessions nobody got past the handshake on. See [sessionLedger].
 func (g *Gateway) Sessions() []SessionInfo { return g.internal.report(g.server) }
 
 // PublishedTools lists everything the gateway offers its clients: its own
@@ -450,6 +458,47 @@ func (g *Gateway) describeServer(server, uri string) (*mcp.ReadResourceResult, e
 		}, nil
 	}
 	return nil, fmt.Errorf("no server named %q", server)
+}
+
+// The two methods a client can open a session with. Neither says the
+// client intends to use the session it just created: the SDK client tries
+// server/discover, and starts over on a new session when the versions do
+// not overlap.
+//
+// Spelled out here because the SDK keeps its method names private. If a
+// third handshake method ever appears, a session opened with it counts as a
+// client one message earlier than it should — which is the harmless
+// direction to be wrong in.
+const (
+	methodInitialize = "initialize"
+	methodDiscover   = "server/discover"
+)
+
+// trackSessions decides which sessions are clients.
+//
+// A session becomes a client when it sends something that is not a
+// handshake. Nothing else available distinguishes a client from the debris
+// of one: an abandoned session is not closed, announces the same client
+// name as the real one, and stays until the session timeout.
+//
+// The mark is made before the message is handled rather than after, so that
+// the initialize request cannot mark its own session — it is the message
+// whose session might still turn out to be abandoned. What marks the
+// session is the next thing to arrive, which for a conforming client is
+// notifications/initialized and for any other is the first real request.
+func (g *Gateway) trackSessions() {
+	g.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if method != methodInitialize && method != methodDiscover {
+				if req != nil {
+					if session, ok := req.GetSession().(*mcp.ServerSession); ok {
+						g.internal.engage(session)
+					}
+				}
+			}
+			return next(ctx, method, req)
+		}
+	})
 }
 
 // installWireLogging records every message in both directions.

@@ -31,18 +31,52 @@ const systemToolReadTimeout = 10 * time.Second
 // handshake. It never reaches a real peer.
 const internalClientName = "mcphub-internal"
 
-// internalSessions records the sessions the gateway opened to itself, so
-// that they can be kept out of the reported session list. An operator
-// reading that list is asking who is connected, and the gateway talking
-// to itself is not an answer to that question.
+// sessionLedger records the two things the gateway knows about its own
+// sessions that the SDK does not report, both of which decide whether a
+// session is a connected client.
+//
+// An operator reading that list is asking who is connected. Two kinds of
+// session are not an answer to that question:
+//
+// The gateway talking to itself. It opens in-process sessions to read its
+// own tools back and to run a tool for the management API.
+//
+// A session nobody got past the handshake on. One connecting client can
+// create two: the SDK client tries the modern server/discover handshake
+// first and, when there is no version overlap, abandons that session and
+// starts again with the legacy initialize on a fresh one. The abandoned
+// session is never closed — it waits for the session timeout, half an hour
+// by default — so during that time one client is reported as two. That was
+// the bug: a list of who is connected that doubles every entry is not
+// describing the installation.
 //
 // Sessions are tracked by identity rather than by the client name they
 // announce, because a name is something a remote client chooses: filtering
 // on one would let any client hide itself from the list by claiming to be
 // this one.
-type internalSessions struct {
-	mu   sync.Mutex
+type sessionLedger struct {
+	mu sync.Mutex
+
+	// open are the sessions the gateway opened to itself.
 	open map[*mcp.ServerSession]struct{}
+
+	// engaged are the sessions that have sent something after their
+	// handshake. See [Gateway.trackSessions] for why that is the test.
+	engaged map[*mcp.ServerSession]struct{}
+}
+
+// engage marks a session as one a client is actually using.
+func (s *sessionLedger) engage(session *mcp.ServerSession) {
+	if session == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.engaged == nil {
+		s.engaged = map[*mcp.ServerSession]struct{}{}
+	}
+	s.engaged[session] = struct{}{}
 }
 
 // add registers a session, running connect under the lock.
@@ -51,7 +85,7 @@ type internalSessions struct {
 // before Connect returns: taking it afterwards would leave a window in
 // which the session is on the server and not yet known to be internal,
 // and a concurrent read of the session list would report it.
-func (s *internalSessions) add(connect func() (*mcp.ServerSession, error)) (*mcp.ServerSession, error) {
+func (s *sessionLedger) add(connect func() (*mcp.ServerSession, error)) (*mcp.ServerSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -66,9 +100,8 @@ func (s *internalSessions) add(connect func() (*mcp.ServerSession, error)) (*mcp
 	return session, nil
 }
 
-// report describes the sessions the server has that are not the
-// gateway's own, and forgets the marks belonging to sessions it no longer
-// has.
+// report describes the clients the server has, and forgets the marks
+// belonging to sessions it no longer has.
 //
 // The marks are dropped here rather than when an internal session closes,
 // because closing does not remove it: the SDK deregisters a session from
@@ -84,22 +117,31 @@ func (s *internalSessions) add(connect func() (*mcp.ServerSession, error)) (*mcp
 // taken outside would be a view of the sessions at one moment paired with
 // a view of the marks at another — and a session marked between the two
 // would be reported as a client.
-func (s *internalSessions) report(server *mcp.Server) []SessionInfo {
+func (s *sessionLedger) report(server *mcp.Server) []SessionInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	out := []SessionInfo{}
-	remaining := make(map[*mcp.ServerSession]struct{}, len(s.open))
+	open := make(map[*mcp.ServerSession]struct{}, len(s.open))
+	engaged := make(map[*mcp.ServerSession]struct{}, len(s.engaged))
 
 	for session := range server.Sessions() {
 		if _, internal := s.open[session]; internal {
-			remaining[session] = struct{}{}
+			open[session] = struct{}{}
 			continue
 		}
+		if _, using := s.engaged[session]; !using {
+			// Either still mid-handshake, which lasts a millisecond, or
+			// abandoned, which lasts until the session timeout. Neither is
+			// a client to report.
+			continue
+		}
+		engaged[session] = struct{}{}
 		out = append(out, describe(session))
 	}
 
-	s.open = remaining
+	s.open = open
+	s.engaged = engaged
 	sortSessions(out)
 	return out
 }
@@ -107,17 +149,22 @@ func (s *internalSessions) report(server *mcp.Server) []SessionInfo {
 // forget drops the marks for sessions the server no longer has, without
 // building a report. It runs after an internal call so that the marks do
 // not accumulate on an installation whose session list is never read.
-func (s *internalSessions) forget(server *mcp.Server) {
+func (s *sessionLedger) forget(server *mcp.Server) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	remaining := make(map[*mcp.ServerSession]struct{}, len(s.open))
+	open := make(map[*mcp.ServerSession]struct{}, len(s.open))
+	engaged := make(map[*mcp.ServerSession]struct{}, len(s.engaged))
 	for session := range server.Sessions() {
 		if _, internal := s.open[session]; internal {
-			remaining[session] = struct{}{}
+			open[session] = struct{}{}
+		}
+		if _, using := s.engaged[session]; using {
+			engaged[session] = struct{}{}
 		}
 	}
-	s.open = remaining
+	s.open = open
+	s.engaged = engaged
 }
 
 // withInternalSession runs fn against a session connected to the
