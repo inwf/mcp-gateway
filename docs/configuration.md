@@ -82,14 +82,24 @@ CLI 的客户端类命令需要 `--address host:port`。
 
 日志文件写在数据目录下的 `logs/`。
 
-| 字段           | 默认        | 说明                                    |
-| -------------- | ----------- | --------------------------------------- |
-| `level`        | `info`      | `debug` / `info` / `warn` / `error`      |
-| `format`       | `console`   | `console`（给人看）或 `json`（给机器看） |
-| `maxAge`       | `168h0m0s`  | 轮转后的日志保留多久                     |
-| `maxSizeMB`    | `50`        | 单个日志文件多大时轮转                   |
-| `mcpWireDebug` | `false`     | 记录双向的 MCP 原始报文。很吵，排查协议层问题时才开 |
-| `apiDebug`     | `false`     | 记录管理 API 的请求与响应体              |
+| 字段               | 默认        | 说明                                    |
+| ------------------ | ----------- | --------------------------------------- |
+| `level`            | `info`      | `debug` / `info` / `warn` / `error`      |
+| `format`           | `console`   | `console`（给人看）或 `json`（给机器看） |
+| `maxAge`           | `168h0m0s`  | 轮转后的日志保留多久                     |
+| `maxSizeMB`        | `50`        | 单个日志文件多大时轮转                   |
+| `mcpWireDebug`     | `false`     | 记录双向的 MCP 原始报文。很吵，排查协议层问题时才开 |
+| `apiDebug`         | `false`     | 记录管理 API 的请求与响应体              |
+| `gatewayDebug`     | `false`     | 只把**网关自己**的动作记到 debug：发布/撤下了哪些工具、转发成功与失败 |
+| `showTraceContext` | `true`      | 输出里带上 `requestId` 与 `session`      |
+
+**`gatewayDebug` 与把 `level` 调成 `debug` 不是一回事。** 后者是钝器：整个程序的
+debug 一起出来，每台上游服务器的絮语和每个 HTTP 请求都在里面，你要找的那一行从
+中间划过去。`gatewayDebug` 只放网关这一个模块。
+
+**`showTraceContext` 只影响控制台与文件，不影响日志页。** 关掉它是让每行短一点、
+便于扫读；内存里的日志缓冲两种情况下都保留全部字段，所以 Web 界面照样能按
+`requestId` 或 `session` 筛。
 
 ## `security`
 
@@ -172,6 +182,8 @@ gateway:
 | `command`      | stdio         | —         | 要执行的程序，**必填**                        |
 | `args`         | stdio         | *(空)*    | 命令行参数                                   |
 | `env`          | stdio         | *(空)*    | 追加的环境变量。是**叠加**不是替换，子进程仍能拿到 `PATH`、`HOME` |
+| `readyPatterns`| stdio         | *(空)*    | 正则列表，匹配子进程写到 stderr 的行；命中任意一条才开始握手 |
+| `readyTimeout` | stdio         | `30s`     | 等待上面那些模式的上限。**超时不是失败**，见下  |
 | `url`          | streamable-http | —       | 服务端点，**必填**                            |
 | `headers`      | streamable-http | *(空)* | 每个请求都会带上的请求头，如 `Authorization`   |
 | `proxy`        | streamable-http | *(空)* | 走 HTTP 代理连接。不写则沿用 `HTTP_PROXY` 等环境变量 |
@@ -180,6 +192,19 @@ gateway:
 `command` 且不能有 `url`/`proxy`；streamable-http 必须有 `url` 且不能有 `command`。
 在 stdio 服务器上写 `url`，最可能的情况是传输类型选错了——静默丢弃它会让 mcphub
 连到一个不是你想要的地方去。
+
+**`readyPatterns` 是给那些"要先说一句话才能应答"的服务器用的**（例如先打一行
+`listening on ...`，或者先自己装一遍依赖）。不写就不等，握手立刻开始——绝大多数
+服务器要的是这个，所以这两个字段留空是正常状态。
+
+**超时之后照样握手，只是记一条警告。** 这是刻意的：模式写错一个字比服务器真的很慢
+常见得多，而"超时即失败"会把一个拼写错误变成一台永远连不上的服务器。等待用尽后落回
+`startup` 那边的 `maxRetries` / `retryBackoff` 重试路径，两个机制是串联的。
+
+注意这个等待**每次连接、每次重试都要全额付**，所以 `readyTimeout` 调大之前先确认
+模式真的能匹配上——`readyPatterns` 是正则，`.` 和 `(` 都有含义。模式编译不过、写成
+空串、或者只写了 `readyTimeout` 而没有模式，都会在保存前被拒绝并指名字段，而不是等
+到启动才炸。
 
 两个例子：
 
