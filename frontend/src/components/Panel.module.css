@@ -19,6 +19,49 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The heading row as a fold handle. A button, so it is reached by keyboard
+   and announced as one — but stripped back to the heading it contains,
+   because it has to read as a title rather than as a control. */
+.handle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.handle:hover .heading {
+  color: var(--ink);
+}
+
+.handle:focus-visible {
+  outline: 2px solid var(--line-accent);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+/* Points right when shut, down when open. The rotation is the only thing
+   that says which way the handle goes before it is used. */
+.arrow {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  transition: transform var(--fast) var(--ease);
+}
+
+.arrowOpen {
+  transform: rotate(90deg);
+}
+
+/* A folded panel is one row. Its heading's bottom border would then be a
+   line under nothing. */
+.headFolded {
+  border-bottom: none;
 }
 
 /* The heading carries the label styling, so the browser's own idea of

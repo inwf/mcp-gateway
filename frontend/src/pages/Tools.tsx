@@ -14,6 +14,7 @@ import { Reveal } from '@/components/Reveal';
 import { ToolCallDialog } from '@/components/ToolCallDialog';
 import { useExposure } from '@/hooks/use-exposure';
 import { useToolLayoutStore, type ToolLayout } from '@/stores/tool-layout';
+import { SYSTEM_GROUP, useToolCollapseStore } from '@/stores/tool-collapse';
 import { cx } from '@/lib/cx';
 import styles from './Tools.module.css';
 
@@ -311,6 +312,8 @@ export default function Tools() {
   const [calling, setCalling] = useState<AggregatedTool | null>(null);
   const layout = useToolLayoutStore((state) => state.layout);
   const setLayout = useToolLayoutStore((state) => state.setLayout);
+  const collapsed = useToolCollapseStore((state) => state.collapsed);
+  const toggleGroup = useToolCollapseStore((state) => state.toggle);
 
   // The search runs on the gateway rather than here: it scores matches
   // across every connected server, and the result order is that score.
@@ -413,6 +416,14 @@ export default function Tools() {
   const failure = tools.error ?? gateway.error ?? servers.error;
   const truncated = (tools.data ?? []).length >= LIMIT;
 
+  // A search asks to see something, so a group holding a match is opened
+  // whatever it was left at. Folding is about putting away what is not the
+  // question; under a search everything on screen is the question. The
+  // remembered state is untouched, so clearing the search puts each group
+  // back where it was.
+  const searching = search.trim() !== '';
+  const isOpen = (key: string) => searching || !collapsed.includes(key);
+
   if (failure) {
     return (
       <div className={styles.page}>
@@ -466,10 +477,17 @@ export default function Tools() {
       ) : (
         <>
           {shownSystem.length > 0 ? (
+            // Collapsible like the rest, but nothing puts it away by
+            // default: under progressive disclosure these are the only
+            // tools a client is shown without being asked, so they are
+            // what a first visit should land on.
             <Panel
               title={t('tools.system')}
               count={shownSystem.length}
               actions={<span className={styles.mark}>{t('tools.builtIn')}</span>}
+              collapsible
+              open={isOpen(SYSTEM_GROUP)}
+              onToggle={() => toggleGroup(SYSTEM_GROUP)}
             >
               <ToolGroup tools={shownSystem} layout={layout} onCall={setCalling} />
             </Panel>
@@ -479,6 +497,12 @@ export default function Tools() {
             <Panel
               key={group.server}
               title={<span className={styles.serverName}>{group.server}</span>}
+              // An empty group's body is the sentence explaining why it is
+              // empty, which is the only thing it has to say. Folding that
+              // away would leave a heading and no answer.
+              collapsible={group.tools.length > 0}
+              open={isOpen(group.server)}
+              onToggle={() => toggleGroup(group.server)}
               // The pair, not the count: the gateway offers nothing it has
               // not been asked to, so "3" alone reads as all this server
               // has. "3 / 9" says how much was asked for.

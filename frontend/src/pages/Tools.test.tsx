@@ -5,6 +5,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '@/test/harness';
 import { useToolLayoutStore } from '@/stores/tool-layout';
+import { useToolCollapseStore } from '@/stores/tool-collapse';
 import Tools from './Tools';
 
 const api = setupServer();
@@ -574,5 +575,167 @@ describe('the layout toggle', () => {
     // In the browser's storage, not the gateway's configuration: the
     // choice belongs to whoever is looking at the screen.
     expect(localStorage.getItem('mcphub.tools.layout')).toContain('list');
+  });
+});
+
+/*
+ * Folding a group away.
+ *
+ * One panel per server answered "what does this server offer"; it did not
+ * answer "put away the four servers that are not my question". Five
+ * servers of forty tools each is a page you scroll through rather than
+ * read, and the list layout only made each group shorter.
+ *
+ * What the tests below have to distinguish is a handle that is present
+ * from a handle that works: asserting the arrow exists would pass on a
+ * panel that never folds anything.
+ */
+describe('folding a group away', () => {
+  afterEach(() => {
+    useToolCollapseStore.setState({ collapsed: [] });
+    localStorage.clear();
+  });
+
+  /** The fold handle of the group with this heading. The heading is inside
+   *  the button, so the button is what carries the expanded state. */
+  function handle(name: string): HTMLElement {
+    const button = screen.getByRole('heading', { name }).closest('button');
+    if (!button) throw new Error(`the heading for ${name} is not a fold handle`);
+    return button;
+  }
+
+  it('hides a group’s tools when its heading is clicked', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await userEvent.click(handle('files'));
+
+    expect(screen.queryByText('files_read')).not.toBeInTheDocument();
+    // Only that group. The point of folding one is to read another.
+    expect(screen.getByText('bing_search')).toBeInTheDocument();
+  });
+
+  it('brings them back when it is clicked again', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await userEvent.click(handle('files'));
+    await userEvent.click(handle('files'));
+
+    expect(screen.getByText('files_read')).toBeInTheDocument();
+  });
+
+  // The heading stays, and so does everything on it. Folded, the count and
+  // the state badge are the only things the group is still saying.
+  it('keeps the heading, the count and the state on screen', async () => {
+    serving(FORWARDED, OWN, [
+      view('files', { exposedCount: 1, toolCount: 9, state: 'failed', error: 'boom' }),
+      view('bing'),
+    ]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await userEvent.click(handle('files'));
+
+    const files = within(group('files'));
+    expect(files.getByText('已暴露 1 / 9')).toBeInTheDocument();
+    expect(files.getByText('连接失败')).toBeInTheDocument();
+  });
+
+  it('says whether a group is open, for a reader who cannot see the arrow', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    expect(handle('files')).toHaveAttribute('aria-expanded', 'true');
+
+    await userEvent.click(handle('files'));
+    expect(handle('files')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('remembers by server name, in the browser', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await userEvent.click(handle('files'));
+
+    // The name, not the position: a server's position shifts as others
+    // are added and removed, while its name is what was recognised.
+    expect(useToolCollapseStore.getState().collapsed).toEqual(['files']);
+    expect(localStorage.getItem('mcphub.tools.collapsed')).toContain('files');
+  });
+
+  // Searching is asking to see something. A group holding a match that
+  // stayed folded would be a search that found the tool and hid it.
+  it('opens a folded group that a search reached', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await userEvent.click(handle('files'));
+    expect(screen.queryByText('files_read')).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole('searchbox'), 'disk');
+
+    expect(await screen.findByText('files_read')).toBeInTheDocument();
+  });
+
+  // Ignored while searching, not forgotten by it — otherwise every search
+  // would silently undo whatever had been put away.
+  it('folds it again when the search is cleared', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await userEvent.click(handle('files'));
+
+    const box = screen.getByRole('searchbox');
+    await userEvent.type(box, 'disk');
+    await screen.findByText('files_read');
+    await userEvent.clear(box);
+
+    await waitFor(() => expect(screen.queryByText('files_read')).not.toBeInTheDocument());
+  });
+
+  // An empty group's body is the sentence saying why it is empty. Folding
+  // it away would leave a heading with no answer under it.
+  it('gives no handle to a group with nothing in it', async () => {
+    serving([], OWN, [view('quiet', { toolCount: 0 })]);
+    renderWithProviders(<Tools />);
+
+    await screen.findByRole('heading', { name: 'quiet' });
+    expect(screen.getByRole('heading', { name: 'quiet' }).closest('button')).toBeNull();
+    expect(within(group('quiet')).getByText('没有工具')).toBeInTheDocument();
+  });
+
+  // Under progressive disclosure these are the only tools a client is
+  // shown without asking, so nothing should put them away for you.
+  it('leaves the gateway’s own group open to begin with, but foldable', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('list_servers');
+    expect(handle('系统工具')).toHaveAttribute('aria-expanded', 'true');
+
+    await userEvent.click(handle('系统工具'));
+    expect(screen.queryByText('list_servers')).not.toBeInTheDocument();
+  });
+
+  // The two layouts are two views of one page, so a fold has to mean the
+  // same thing in both.
+  it('folds in the list layout too', async () => {
+    serving();
+    renderWithProviders(<Tools />);
+
+    await screen.findByText('files_read');
+    await userEvent.click(screen.getByText('列表'));
+    await userEvent.click(handle('files'));
+
+    expect(screen.queryByText('files_read')).not.toBeInTheDocument();
+
+    useToolLayoutStore.setState({ layout: 'cards' });
   });
 });

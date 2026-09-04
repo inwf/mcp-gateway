@@ -4,6 +4,7 @@ REFACTOR_PLAN.md
 
 # ===== Claude Code local state =====
 .claude/
+MEMORY.md
 
 # ===== Runtime data (config, logs, pid) — always project-local, never ~/ =====
 backend/data/
