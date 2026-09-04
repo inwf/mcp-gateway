@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -358,6 +360,282 @@ func TestServeRefusesAnInvalidConfiguration(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "port") {
 		t.Errorf("error %q does not name the offending field", err)
+	}
+}
+
+// ===== the address on the command line =====
+
+/*
+ * --host and --port.
+ *
+ * The port override existed before any of this: it was added so that no
+ * serve test would bind a fixed port, and its comment said as much — "tests
+ * use it". Nothing reached it from the command line, so changing the
+ * address a gateway listens on meant editing the configuration file, which
+ * is the wrong shape for "just this once, somewhere else".
+ *
+ * These go through run() rather than calling serve directly, because what
+ * was missing was the wiring: a test on serveOptions would have passed
+ * before this change.
+ */
+
+// commandServing runs the whole command tree the way main does, and waits
+// until it reports an address.
+//
+// The address is read back out of the startup line rather than assumed,
+// which is the only honest way to check where a port-zero listener ended up
+// — and the same line a person reads for it.
+func commandServing(t *testing.T, args ...string) (addr string, stop func()) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reader, writer := io.Pipe()
+	reported := make(chan string, 1)
+	finished := make(chan int, 1)
+
+	go func() {
+		defer writer.Close()
+		finished <- run(ctx, args, writer, io.Discard)
+	}()
+
+	// Draining the pipe is not optional: an undrained writer would block
+	// the command being tested at its first line of output.
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			if _, where, found := strings.Cut(scanner.Text(), "listening on http://"); found {
+				select {
+				case reported <- where:
+				default:
+				}
+			}
+		}
+	}()
+
+	stop = func() {
+		cancel()
+		select {
+		case code := <-finished:
+			if code != exitOK {
+				t.Errorf("exit code = %d, want %d", code, exitOK)
+			}
+		case <-time.After(30 * time.Second):
+			t.Error("the command never returned after being interrupted")
+		}
+	}
+
+	select {
+	case where := <-reported:
+		return where, stop
+	case code := <-finished:
+		cancel()
+		t.Fatalf("the command exited with %d before it was listening", code)
+	case <-time.After(30 * time.Second):
+		cancel()
+		t.Fatal("the command never reported an address")
+	}
+	return "", nil
+}
+
+// configuredAt writes a configuration that asks for one particular address,
+// so that an override has something to visibly beat.
+//
+// The port comes from freePort in the servers tests: a number chosen by hand
+// would be a fixed port by another name, and this machine very likely has an
+// instance of this very program on the default one.
+func configuredAt(t *testing.T, host string, port int) string {
+	t.Helper()
+
+	dir := isolated(t)
+	cfg := config.Default()
+	cfg.Listen.Host = host
+	cfg.Listen.Port = port
+	cfg.Startup.ConnectDelay = 0
+	cfg.MCPServers = map[string]config.MCPServer{}
+
+	if err := config.Save(filepath.Join(dir, "config.yaml"), cfg); err != nil {
+		t.Fatalf("save the configuration: %v", err)
+	}
+	return dir
+}
+
+func TestThePortFlagOverridesTheConfiguredPort(t *testing.T) {
+	configured, wanted := freePort(t), freePort(t)
+	dir := configuredAt(t, "127.0.0.1", configured)
+
+	addr, stop := commandServing(t, "serve", "--data-dir", dir, "--port", strconv.Itoa(wanted))
+	defer stop()
+
+	if want := "127.0.0.1:" + strconv.Itoa(wanted); addr != want {
+		t.Errorf("listening on %s, want %s", addr, want)
+	}
+}
+
+// A flag says "this run". Writing it back would turn one invocation into a
+// permanent change nobody asked for, and the next start without the flag
+// would quietly move.
+func TestThePortFlagIsNotWrittenBackToTheConfiguration(t *testing.T) {
+	configured := freePort(t)
+	dir := configuredAt(t, "127.0.0.1", configured)
+	path := filepath.Join(dir, "config.yaml")
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the configuration: %v", err)
+	}
+
+	_, stop := commandServing(t, "serve", "--data-dir", dir, "--port", strconv.Itoa(freePort(t)))
+	stop()
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the configuration back: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("the configuration file was rewritten:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	// And it still asks for the port it always did.
+	if !strings.Contains(string(after), strconv.Itoa(configured)) {
+		t.Errorf("the configured port %d is gone from the file:\n%s", configured, after)
+	}
+}
+
+// Serving is what mcphub does with no subcommand, so both spellings have to
+// take the flag — including the one where it comes before the subcommand,
+// which cobra parses with the subcommand's own flag set.
+func TestThePortFlagWorksInEveryPositionThatServes(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args func(dir, port string) []string
+	}{
+		{"after the subcommand", func(dir, port string) []string {
+			return []string{"serve", "--data-dir", dir, "--port", port}
+		}},
+		{"before the subcommand", func(dir, port string) []string {
+			return []string{"--data-dir", dir, "--port", port, "serve"}
+		}},
+		{"with no subcommand at all", func(dir, port string) []string {
+			return []string{"--data-dir", dir, "--port", port}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			wanted := freePort(t)
+			dir := configuredAt(t, "127.0.0.1", freePort(t))
+
+			addr, stop := commandServing(t, tt.args(dir, strconv.Itoa(wanted))...)
+			defer stop()
+
+			if want := "127.0.0.1:" + strconv.Itoa(wanted); addr != want {
+				t.Errorf("listening on %s, want %s", addr, want)
+			}
+		})
+	}
+}
+
+// Zero is a value, not an absence: it asks the operating system for any
+// free port. Treating it as "no flag given" would leave the only way to say
+// "pick one for me" unavailable from the command line.
+func TestPortZeroOnTheCommandLineAsksForAnyFreePort(t *testing.T) {
+	configured := freePort(t)
+	dir := configuredAt(t, "127.0.0.1", configured)
+
+	addr, stop := commandServing(t, "serve", "--data-dir", dir, "--port", "0")
+	defer stop()
+
+	if strings.HasSuffix(addr, ":"+strconv.Itoa(configured)) {
+		t.Errorf("listening on %s, which is the configured port — the flag did nothing", addr)
+	}
+	if strings.HasSuffix(addr, ":0") {
+		t.Errorf("listening on %s, which is not a real port", addr)
+	}
+}
+
+// The host reaches the listener too, checked by giving the file an address
+// this machine cannot bind and the flag one it can. Both halves are here on
+// purpose: without the first, a passing test would only prove that
+// 127.0.0.1 works, which it would have done with no flag at all.
+func TestTheHostFlagOverridesTheConfiguredHost(t *testing.T) {
+	// Valid as a configuration value and unbindable in fact, which is the
+	// combination this needs: it passes validation and then fails to bind.
+	const unbindable = "240.0.0.1"
+
+	t.Run("the configured host is what fails without the flag", func(t *testing.T) {
+		dir := configuredAt(t, unbindable, freePort(t))
+
+		code, _, stderr := execute(t, "serve", "--data-dir", dir)
+
+		if code != exitFailure {
+			t.Errorf("exit code = %d, want %d", code, exitFailure)
+		}
+		if !strings.Contains(stderr, unbindable) {
+			t.Errorf("the failure does not name the host it tried:\n%s", stderr)
+		}
+	})
+
+	t.Run("the flag replaces it", func(t *testing.T) {
+		dir := configuredAt(t, unbindable, freePort(t))
+
+		addr, stop := commandServing(t, "serve", "--data-dir", dir, "--host", "localhost")
+		defer stop()
+
+		if strings.HasPrefix(addr, unbindable) {
+			t.Errorf("listening on %s, so the flag did nothing", addr)
+		}
+	})
+}
+
+// A value typed on the command line is checked by the same rules as one
+// read from the file — and reported as a usage error, because the person who
+// typed it is the one who has to change it.
+func TestAnImpossibleAddressOnTheCommandLineIsAUsageError(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		args  []string
+		wants string
+	}{
+		{"a port above the range", []string{"--port", "70000"}, "--port"},
+		{"a negative port", []string{"--port", "-1"}, "--port"},
+		{"a host that is a URL", []string{"--host", "http://example.com/mcp"}, "--host"},
+		{"an empty host", []string{"--host", ""}, "--host"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := configuredAt(t, "127.0.0.1", freePort(t))
+
+			code, _, stderr := execute(t, append([]string{"serve", "--data-dir", dir}, tt.args...)...)
+
+			if code != exitUsage {
+				t.Errorf("exit code = %d, want %d (a usage error)\nstderr: %s", code, exitUsage, stderr)
+			}
+			// The flag, not `listen.port`: the rule is shared with the
+			// configuration file, but the name has to be the one that was
+			// typed or the reader goes looking in the wrong place.
+			if !strings.Contains(stderr, tt.wants) {
+				t.Errorf("the failure does not name %s:\n%s", tt.wants, stderr)
+			}
+		})
+	}
+}
+
+// Deliberately not a persistent flag on the root command. The client
+// commands talk to a gateway that is already running and say where with
+// --address; a --port that sat on them and did nothing would be worse than
+// not having one.
+func TestTheClientCommandsHaveNoPortFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"servers", "list", "--port", "9000"},
+		{"tools", "list", "--port", "9000"},
+		{"status", "--port", "9000"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, _, stderr := execute(t, args...)
+
+			if code != exitUsage {
+				t.Errorf("exit code = %d, want %d (a usage error)\nstderr: %s", code, exitUsage, stderr)
+			}
+			if !strings.Contains(stderr, "unknown flag") {
+				t.Errorf("the failure does not say the flag is unknown:\n%s", stderr)
+			}
+		})
 	}
 }
 

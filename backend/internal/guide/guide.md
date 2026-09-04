@@ -32,6 +32,17 @@ mcphub serve
 首次启动不需要配置文件，它会以默认值运行；等你配置了第一台服务器才会写出
 `config.yaml`。
 
+只想换一次地址，不动配置文件：
+
+```
+mcphub serve --port 9000
+```
+
+`--host` / `--port` 压过 `listen.host` / `listen.port`，**只影响本次运行**。
+`--port 0` 表示向操作系统要一个空闲端口，实际端口在启动输出里报出。
+`--host` 设成回环之外的地址，等于把管理 API 也一起暴露出去——它能改变哪些命令
+会被当作子进程执行，所以那应当是一个明确的决定。
+
 改配置前可以先离线检查一遍，这一步不需要网关在跑：
 
 ```
@@ -208,6 +219,7 @@ mcphub check
 
 ```
 mcphub serve                        启动网关（不带子命令时的默认动作）
+mcphub serve --host H --port N      换一次监听地址，不写回配置文件
 mcphub check                        校验配置并报告各项路径，不监听端口
 mcphub config validate [file]       离线检查配置，一次报出全部问题
 

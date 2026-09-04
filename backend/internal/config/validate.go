@@ -78,13 +78,32 @@ func (c Config) Validate() error {
 	return &ValidationError{Errors: v.errs}
 }
 
-func (c Config) validateListen(v *validator) {
+func (c Config) validateListen(v *validator) { validateListen(v, c.Listen) }
+
+// ValidateListen reports every problem with a listen address. It returns
+// nil or a *[ValidationError].
+//
+// This is for a caller that has an address from somewhere other than the
+// configuration file — a command-line override, say. Validating a whole
+// configuration to check one address would report every other setting's
+// problems alongside, which is the wrong answer to "can I listen here".
+func ValidateListen(l Listen) error {
+	v := &validator{}
+	validateListen(v, l)
+
+	if len(v.errs) == 0 {
+		return nil
+	}
+	return &ValidationError{Errors: v.errs}
+}
+
+func validateListen(v *validator, l Listen) {
 	switch {
-	case c.Listen.Host == "":
+	case l.Host == "":
 		v.add("listen.host", "is empty")
-	case strings.Contains(c.Listen.Host, "/"):
+	case strings.Contains(l.Host, "/"):
 		v.add("listen.host", "looks like a URL; use a bare host such as %q", "127.0.0.1")
-	case strings.Contains(c.Listen.Host, ":") && !isIP(c.Listen.Host):
+	case strings.Contains(l.Host, ":") && !isIP(l.Host):
 		v.add("listen.host", "looks like it includes a port; set listen.port instead")
 	}
 
@@ -93,8 +112,8 @@ func (c Config) validateListen(v *validator) {
 	// is the standard way to say "pick one" and the chosen port is
 	// reported on startup. Omitting the key gets the default rather than
 	// zero, so this cannot mask a forgotten setting.
-	if c.Listen.Port < 0 || c.Listen.Port > 65535 {
-		v.add("listen.port", "is %d, want 0-65535 (0 asks for any free port)", c.Listen.Port)
+	if l.Port < 0 || l.Port > 65535 {
+		v.add("listen.port", "is %d, want 0-65535 (0 asks for any free port)", l.Port)
 	}
 }
 
