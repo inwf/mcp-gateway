@@ -8,7 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"mcphub/internal/config"
+	// Imported to ask the gateway what it actually does with an empty
+	// exposure list, rather than restating the rule here. Legal because
+	// this is the external test package: gateway depends on config, and
+	// config_test is not config.
+	"mcphub/internal/gateway"
 )
 
 // The configuration reference was the one part of this project's account of
@@ -124,6 +131,56 @@ var fieldRow = regexp.MustCompile("^\\| `([A-Za-z][A-Za-z0-9]*)`")
 // sectionHeading matches the heading of a section that describes a
 // configuration section, which is written as the key itself.
 var sectionHeading = regexp.MustCompile("^## `[A-Za-z]")
+
+// The default for exposedTools is the one thing in this document that was
+// documented backwards: it said an empty list exposes every tool, while
+// FilterTools returns nothing unless a tool is named.
+//
+// That is the project's central design decision — tools are deliberately
+// kept out of tools/list so their schemas do not fill every client's
+// context — and the reference described the behaviour it was changed away
+// from. Someone configuring from it would omit the field expecting
+// everything, get seven system tools, and go read the source.
+//
+// The two tests above cannot see this: the field name was present and
+// correct, and prose has no type checker. So this one holds the sentence
+// itself, which is as narrow as it looks and is the point — it is the
+// only kind of assertion that could have caught it.
+func TestTheReferenceDoesNotClaimAnEmptyExposedToolsListExposesEverything(t *testing.T) {
+	// Asked of the code rather than assumed, so that reversing the rule
+	// some day fails here too — and whoever reverses it is sent to the
+	// document instead of leaving it describing the old rule a second time.
+	if exposed := gateway.FilterTools([]*mcp.Tool{{Name: "read"}}, nil); len(exposed) != 0 {
+		t.Fatalf("FilterTools exposed %d tools for an empty list, so the rule this "+
+			"test encodes has changed; the document needs rereading", len(exposed))
+	}
+
+	line := rowFor(t, "exposedTools")
+	for _, wrong := range []string{"全部暴露", "都暴露", "暴露全部"} {
+		if strings.Contains(line, wrong) {
+			t.Errorf("the exposedTools row says %q:\n  %s\n"+
+				"an absent or empty list exposes nothing — see gateway.FilterTools",
+				wrong, strings.TrimSpace(line))
+		}
+	}
+	if !strings.Contains(line, "一个都不暴露") {
+		t.Errorf("the exposedTools row does not say that nothing is exposed:\n  %s",
+			strings.TrimSpace(line))
+	}
+}
+
+// rowFor returns the table row describing one field.
+func rowFor(t *testing.T, field string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(readReference(t), "\n") {
+		if match := fieldRow.FindStringSubmatch(line); match != nil && match[1] == field {
+			return line
+		}
+	}
+	t.Fatalf("the configuration reference has no table row for %q", field)
+	return ""
+}
 
 // documentedFields collects the field names the document puts in a table.
 //
