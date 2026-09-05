@@ -48,6 +48,11 @@ interface FormValues {
   connectionTimeout: string;
   idleConnectionTimeout: string;
   defaultSessionMode: 'stateful' | 'stateless';
+  /** User-Agent keywords selecting a mode, one list per mode. Flattened
+   *  out of `gateway.sessionModeRules` because a form field holds one
+   *  value, and these are two independent lists. */
+  statefulClients: string[];
+  statelessClients: string[];
   sessionTimeout: string;
   notifyDebounce: string;
   keepAlive: string;
@@ -76,6 +81,8 @@ function valuesFrom(config: Config): FormValues {
     connectionTimeout: config.security.connectionTimeout,
     idleConnectionTimeout: config.security.idleConnectionTimeout,
     defaultSessionMode: config.gateway.defaultSessionMode,
+    statefulClients: config.gateway.sessionModeRules.stateful ?? [],
+    statelessClients: config.gateway.sessionModeRules.stateless ?? [],
     sessionTimeout: config.gateway.sessionTimeout,
     notifyDebounce: config.gateway.notifyDebounce,
     keepAlive: config.gateway.keepAlive,
@@ -118,6 +125,14 @@ function applyTo(config: Config, values: FormValues): Config {
     gateway: {
       ...config.gateway,
       defaultSessionMode: values.defaultSessionMode,
+      // Sent whether or not there is anything in them: an empty list and
+      // an absent one mean the same thing here — no rules for that mode —
+      // which is not true of `allowedNetworks` above, where empty means
+      // "allow everyone". So there is nothing to preserve by omitting.
+      sessionModeRules: {
+        stateful: values.statefulClients,
+        stateless: values.statelessClients,
+      },
       sessionTimeout: values.sessionTimeout.trim(),
       notifyDebounce: values.notifyDebounce.trim(),
       keepAlive: values.keepAlive.trim(),
@@ -254,6 +269,27 @@ function SettingsForm({ config, onSave, saving }: {
             <Form.Item name="sessionTimeout" label={t('settings.sessionTimeout')}>
               <Input className="mono" />
             </Form.Item>
+
+            {/* The two keyword lists, side by side under one explanation.
+                Read apart they look like two unrelated settings; what
+                matters is that they are alternatives, and that the default
+                above is what applies when neither matches. */}
+            <p className={cx(styles.wide, styles.note)}>{t('settings.sessionModeRulesHint')}</p>
+            <Form.Item
+              name="statefulClients"
+              label={t('settings.statefulClients')}
+              className={cx(styles.wide)}
+            >
+              <StringListEditor placeholder="claude" />
+            </Form.Item>
+            <Form.Item
+              name="statelessClients"
+              label={t('settings.statelessClients')}
+              className={cx(styles.wide)}
+            >
+              <StringListEditor placeholder="curl" />
+            </Form.Item>
+
             <Form.Item name="notifyDebounce" label={t('settings.notifyDebounce')}>
               <Input className="mono" />
             </Form.Item>

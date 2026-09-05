@@ -152,8 +152,12 @@ gateway:
       - python-requests
 ```
 
-匹配不区分大小写。优先级：客户端请求头 `X-MCP-Session-Mode` > 这里的规则 >
-`defaultSessionMode`。
+匹配不区分大小写。同一模式下命中最长的关键词生效；两边一样长时算 `stateful`。
+优先级：客户端请求头 `X-MCP-Session-Mode` > 这里的规则 > `defaultSessionMode`。
+两边都留空就只用默认模式。
+
+**只在下一次启动时生效。** 这些规则在网关启动时读进内存，运行中改文件或改设置
+页都不会影响当前实例（监听地址也是这样）。
 
 **`keepAlive` 有一个前提需要知道。** 它是**服务端向客户端发 MCP `ping`**，这
 要求客户端维持那条**可选的** SSE 长连接（`GET /mcp`）。绝大多数客户端默认都会

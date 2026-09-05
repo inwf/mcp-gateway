@@ -106,9 +106,13 @@ export interface ConfigResponse {
 }
 
 export interface ConfigChange {
+  /** The dotted path of the setting that changed, the same one the
+   *  backend uses in a validation error. */
   field: string;
-  from: string;
-  to: string;
+  /** The previous value, or "(unset)" if the field was absent before. */
+  old: string;
+  /** The new value, or "(unset)" if the field was removed. */
+  new: string;
 }
 
 export interface ConfigWriteResponse {

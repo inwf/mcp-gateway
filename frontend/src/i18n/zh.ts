@@ -281,6 +281,12 @@ export const zh = {
     connectionTimeout: '连接超时',
     idleConnectionTimeout: '空闲超时',
     defaultSessionMode: '默认会话模式',
+    sessionModeRulesHint:
+      '按客户端 User-Agent 里的关键词挑选会话模式（不分大小写，命中最长的那条；' +
+      '两边打平时算 stateful）。优先级从高到低：请求头 x-mcp-session-mode > 这里的关键词 > 上面的默认模式。' +
+      '两边都留空就只用默认模式。',
+    statefulClients: '用 stateful 的客户端关键词',
+    statelessClients: '用 stateless 的客户端关键词',
     sessionTimeout: '会话超时',
     notifyDebounce: '通知去抖',
     keepAlive: '存活探测间隔',

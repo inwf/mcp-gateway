@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +183,22 @@ func TestChangeStringIsReadable(t *testing.T) {
 	c := config.Change{Field: "listen.port", Old: "7788", New: "9000"}
 	if got, want := c.String(), "listen.port: 7788 -> 9000"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+// The web UI reads which field changed off the wire. Without these tags,
+// encoding/json would emit "Field"/"Old"/"New" and the frontend's
+// change.field would always be undefined — so the "restart to apply this"
+// hint would never appear for a listen save.
+func TestChangeSerializesWithTheNamesTheUIUses(t *testing.T) {
+	c := config.Change{Field: "listen.port", Old: "7788", New: "9000"}
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if got, want := string(data),
+		`{"field":"listen.port","old":"7788","new":"9000"}`; got != want {
+		t.Errorf("wire = %s, want %s", got, want)
 	}
 }
 

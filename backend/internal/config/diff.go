@@ -16,10 +16,15 @@ const UnsetValue = "(unset)"
 // Change is one field-level difference between two configurations. Field
 // is the same dotted path used by [FieldError], so a change and a
 // validation problem name a setting the same way.
+//
+// The JSON tags matter as much as the fields: this type is handed to the
+// web UI, which reads change.field/Settings.tsx to decide whether a save
+// needs a restart. The tags make the wire shape the one the frontend
+// declares, and keep the field names from being the Go ones.
 type Change struct {
-	Field string
-	Old   string
-	New   string
+	Field string `json:"field"`
+	Old   string `json:"old"`
+	New   string `json:"new"`
 }
 
 func (c Change) String() string {

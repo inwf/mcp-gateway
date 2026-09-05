@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
@@ -45,7 +45,10 @@ const CONFIG = {
   },
   gateway: {
     defaultSessionMode: 'stateful',
-    sessionModeRules: {},
+    // Rules with something in them, not `{}`. An empty fixture would let
+    // the two "does not lose settings" tests below pass on a form that
+    // dropped these entirely — there would be nothing to drop.
+    sessionModeRules: { stateful: ['claude'], stateless: ['curl'] },
     sessionTimeout: '30m',
     notifyDebounce: '300ms',
     keepAlive: '30s',
@@ -111,6 +114,27 @@ describe('the settings form', () => {
     });
   });
 
+  // A listening port only takes effect on the next start, and the page
+  // says so. Scanning response changes for a listen.* field is how it
+  // knows — which is the one place a malformed wire shape would surface
+  // as a missing message rather than a crash.
+  it('says a listen change needs a restart', async () => {
+    editing();
+    api.use(
+      http.put('/api/config', () =>
+        // Matches the shape the backend actually sends, with the tags
+        // that make it lowercase.
+        HttpResponse.json({
+          config: CONFIG,
+          changes: [{ field: 'listen.port', old: '7788', new: '9000' }],
+        }),
+      ),
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /保存/ }));
+    expect(await screen.findByText(/需要重启网关才会生效/)).toBeInTheDocument();
+  });
+
   // The guard for the whole arrangement: a field the form does not
   // render has to survive a save that changed something else.
   it('keeps a logging setting the form does not show', async () => {
@@ -139,5 +163,95 @@ describe('the settings form', () => {
 
     await waitFor(() => expect(saved.body).toBeDefined());
     expect(saved.body?.config).toMatchObject({ startup: { readyEverything: 'kept' } });
+  });
+
+  it('keeps a gateway setting the form does not show', async () => {
+    const saved = editing({
+      ...CONFIG,
+      gateway: { ...CONFIG.gateway, somethingNewer: 'kept' },
+    });
+
+    await userEvent.click(await screen.findByRole('switch', { name: /记录 API 细节/ }));
+    await save();
+
+    await waitFor(() => expect(saved.body).toBeDefined());
+    expect(saved.body?.config).toMatchObject({ gateway: { somethingNewer: 'kept' } });
+  });
+});
+
+/*
+ * Which clients get a stateful session.
+ *
+ * The three levels have been in the gateway all along — a request header
+ * outranks a User-Agent rule, which outranks the default mode — and the
+ * type carried the rules through this page untouched. What was missing was
+ * anywhere to type one: the only way to add a keyword was the raw YAML
+ * tab, and the priority order was written down nowhere a person editing
+ * this would see it.
+ */
+describe('the session mode rules', () => {
+  /** The list editor under this label. Both lists are the same control, so
+   *  a query by role alone cannot tell them apart — and the two mode names
+   *  appear in the segmented control and the explanation as well, so the
+   *  label has to be matched whole. */
+  function list(label: string): HTMLElement {
+    const field = screen.getByText(label).closest('.ant-form-item');
+    if (!field) throw new Error(`no form field is labelled ${label}`);
+    return field as HTMLElement;
+  }
+
+  const STATEFUL = '用 stateful 的客户端关键词';
+  const STATELESS = '用 stateless 的客户端关键词';
+
+  it('shows the keywords the configuration already has', async () => {
+    editing();
+
+    await screen.findByDisplayValue('127.0.0.1');
+    expect(within(list(STATEFUL)).getByDisplayValue('claude')).toBeInTheDocument();
+    expect(within(list(STATELESS)).getByDisplayValue('curl')).toBeInTheDocument();
+  });
+
+  it('sends a keyword that was added', async () => {
+    const saved = editing();
+
+    await screen.findByDisplayValue('127.0.0.1');
+    await userEvent.click(within(list(STATELESS)).getByRole('button', { name: /添加/ }));
+    // The new row is the empty one; the existing keyword is in the first.
+    const rows = within(list(STATELESS)).getAllByRole('textbox');
+    await userEvent.type(rows[rows.length - 1]!, 'python-httpx');
+    await save();
+
+    await waitFor(() => expect(saved.body).toBeDefined());
+    expect(saved.body?.config).toMatchObject({
+      gateway: { sessionModeRules: { stateful: ['claude'], stateless: ['curl', 'python-httpx'] } },
+    });
+  });
+
+  it('sends a list emptied of its last keyword', async () => {
+    const saved = editing();
+
+    await screen.findByDisplayValue('127.0.0.1');
+    await userEvent.click(within(list(STATEFUL)).getByRole('button', { name: /移除/ }));
+    await save();
+
+    await waitFor(() => expect(saved.body).toBeDefined());
+    // Empty rather than gone: for these two the empty list and the absent
+    // one mean the same thing, so nothing is lost by sending it — and a
+    // key that vanished would look like a save that failed halfway.
+    expect(saved.body?.config).toMatchObject({
+      gateway: { sessionModeRules: { stateful: [], stateless: ['curl'] } },
+    });
+  });
+
+  // A rule that is quietly overridden by a request header is the thing
+  // someone would come to this page to work out. Saying the order beats
+  // leaving them to find it in the gateway's source.
+  it('says what outranks what', async () => {
+    editing();
+
+    await screen.findByDisplayValue('127.0.0.1');
+    const explanation = screen.getByText(/x-mcp-session-mode/);
+    expect(explanation).toHaveTextContent('请求头');
+    expect(explanation).toHaveTextContent('默认模式');
   });
 });
