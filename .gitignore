@@ -10,6 +10,15 @@ MEMORY.md
 backend/data/
 data/
 
+# ===== Docker =====
+# The compose file people actually run. docker-compose.example.yml is the
+# tracked template; this is the copy, and two of its settings — the
+# published port and the network's subnet — depend on what else is running
+# on the machine. Tracking it would mean anyone who changed one of them had
+# a dirty tree and a change to offer that nobody else wants.
+docker-compose.yml
+docker-compose.override.yml
+
 # ===== Go =====
 backend/bin/
 backend/mcphub

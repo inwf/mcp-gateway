@@ -25,6 +25,25 @@ mcphub 对应的做法是：客户端只配一个地址；提供 `search_tools` 
 
 ## 快速开始
 
+### Docker（不需要装 Go 和 Node）
+
+```
+cp docker-compose.example.yml docker-compose.yml
+docker compose up -d
+```
+
+打开 <http://127.0.0.1:7788/> 是 Web 界面，把客户端指向
+<http://127.0.0.1:7788/mcp>。停止用 `docker compose down`——配置和日志在一个命名
+卷里，不会跟着消失。
+
+`cp` 出来的文件不进版本库：发布端口取决于机器上还跑着什么，跟着仓库走只会让
+改过的人多一份没人想要的改动。
+
+镜像里带了 Node 与 npm，所以 `npx` 那一类 stdio 上游可以直接配，不用再套一层
+自己的镜像。详见 [Docker 一节](#docker)。
+
+### 从源码构建
+
 需要 Go 1.25+ 和 Node 22+（含 pnpm）。
 
 ```
@@ -32,8 +51,7 @@ make build          # 构建前端，嵌入后端，产出单个二进制
 ./backend/bin/mcphub serve
 ```
 
-打开 <http://127.0.0.1:7788/> 是 Web 界面，把客户端指向
-<http://127.0.0.1:7788/mcp>。
+同样是 <http://127.0.0.1:7788/> 和 <http://127.0.0.1:7788/mcp>。
 
 以 Claude Code 为例：
 
@@ -93,6 +111,49 @@ cd frontend && pnpm dev
 **Web 界面是构建期的选择，不是运行期的。** 后端用 `webui` 构建标签决定是否嵌入
 前端；不带这个标签构建出来的二进制照常提供 API 与 MCP 端点，只是没有界面。
 `make build` 会带上它。
+
+## Docker
+
+```
+cp docker-compose.example.yml docker-compose.yml   # 第一次，只需一次
+docker compose up -d          # 起来（第一次会构建镜像）
+docker compose logs -f        # 看日志
+docker compose down           # 停掉，数据卷保留
+docker compose down -v        # 停掉，并且删掉配置与日志
+```
+
+**仓库里只有 `docker-compose.example.yml`，`docker-compose.yml` 在 `.gitignore`
+里。** 需要改的发布端口因机器而异，跟着仓库走的话，谁改了都会得到一个脏的工作区
+和一份别人不想要的改动。`docker-compose.override.yml` 也一并忽略了，习惯用 compose
+的覆盖机制的话可以直接用。
+
+镜像是三段构建，跟 `make build` 同一个顺序：Node 构建前端 → 拷进嵌入目录 →
+带 `webui` 标签构建二进制。跑起来的那一层不带任何工具链。
+
+**镜像里装了 Node 与 npm。** 最常见的 stdio 上游是 `npx` 包，一个起不动这些
+服务器的网关得再套一层自己的镜像才能用——所以这是刻意把镜像做大的唯一一处
+（约 154 MB）。加服务器和平时一样：
+
+```
+docker compose exec mcphub mcphub servers add files -- \
+  npx -y @modelcontextprotocol/server-filesystem /tmp
+```
+
+### 两件需要知道的事
+
+**谁能访问，由发布端口这一道决定。** 默认只发布到宿主机回环
+（`127.0.0.1:7788:7788`），也就是只有这台机器上能连。管理 API 能改变哪些命令会被
+作为子进程执行，所以这道边界值得明确设。内网部署、能连到即可信的场景，改成
+`"7788:7788"` 即对整个内网开放。
+
+**容器里不再用 IP 白名单挡。** mcphub 自带的 `security.allowedNetworks` 默认只放行
+回环，而发布进容器的请求源地址是容器网关（不是回环），用默认会把所有人挡在外面、
+连 Web 界面都是 403。所以入口脚本在**第一次启动**时写一份 `config.yaml`，把这个
+白名单设成空列表——mcphub 读作「放行所有来源」。对容器来说，访问边界是上面那个
+发布端口，不是这个列表。此后该文件不再被脚本改动；若需按来源收紧，把
+空列表换成 CIDR 段（比如 `[10.0.0.0/8]`）即可。
+
+**改监听地址与会话规则要重启才生效。** 容器里也一样，`docker compose restart`。
 
 ## 目录结构
 

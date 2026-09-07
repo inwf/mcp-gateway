@@ -1,0 +1,65 @@
+# What must not reach the build context.
+#
+# Two reasons for anything in here: it would be copied into a layer and
+# make the image bigger for nothing, or it would make the build depend on
+# whatever happens to be on the machine that ran it.
+
+# Runtime data: a configuration with real credentials in it, and logs.
+# This is the important line in this file — the data directory is where
+# the gateway keeps config.yaml, and baking somebody's into an image is
+# how a secret gets published.
+data/
+backend/data/
+
+# Build output from a host build. The image builds its own; copying these
+# in would let a stale local binary or a stale frontend bundle silently
+# win over what this build produced.
+backend/bin/
+backend/mcphub
+backend/internal/webui/dist/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+node_modules/
+frontend/node_modules/
+*.tsbuildinfo
+
+# The reference implementation. Not tracked, not needed, and large.
+old-legacy/
+
+# Local state and notes.
+.claude/
+MEMORY.md
+REFACTOR_PLAN.md
+
+# Version control and editor leftovers.
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Test and coverage leftovers.
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Environment files. A build argument is the way to pass something in,
+# not a file that happens to be lying around.
+.env
+.env.local
+.env.*.local
+
+# Docker's own files: nothing in the build needs to read them, and
+# editing a comment in one should not invalidate the cache for the rest.
+#
+# docker/ is deliberately absent from this list — the entrypoint script
+# lives there and is copied into the image.
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.example.yml
+docker-compose.override.yml

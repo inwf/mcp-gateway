@@ -1,0 +1,70 @@
+# mcphub, one container. This is the template; copy it before starting.
+#
+#   cp docker-compose.example.yml docker-compose.yml
+#   docker compose up -d          start it
+#   docker compose logs -f        watch it
+#   docker compose down           stop it (the data volume survives)
+#
+# Then <http://127.0.0.1:7788/> is the web interface, and
+# <http://127.0.0.1:7788/mcp> is what a client connects to.
+#
+# The copy is the file to edit, and it is not tracked: the published port
+# below depends on what else is running on the machine, so a tracked file
+# would mean anyone who changed it had a dirty tree and a change to offer
+# that nobody else wants.
+
+services:
+  mcphub:
+    build:
+      context: .
+      args:
+        # Shows up in `mcphub version`, the startup line and the web
+        # interface. Override with `VERSION=v1.2.3 docker compose build`.
+        VERSION: ${VERSION:-docker}
+    image: mcphub:local
+    container_name: mcphub
+    restart: unless-stopped
+
+    ports:
+      # Published to the host's loopback only: reaching it means being on
+      # this machine. The management API can change which commands run as
+      # child processes, so who can reach it is worth deciding on purpose.
+      #
+      # For a trusted network where anyone who can see the host may use it,
+      # change this to "7788:7788" to publish on every interface. The
+      # gateway's own allowlist does not stand in the way — the entrypoint
+      # opens it (see docker/entrypoint.sh) — so this line is the control
+      # that decides who can reach it.
+      #
+      # Change the host side if 7788 is taken: "127.0.0.1:8080:7788".
+      - "127.0.0.1:7788:7788"
+
+    volumes:
+      # config.yaml and logs/ live here, so `docker compose down` and a
+      # rebuild do not discard them. Edit the configuration through the
+      # web interface, the CLI, or by editing the file in this volume.
+      - mcphub-data:/data
+
+    environment:
+      # Timestamps in the log match the host's timezone rather than UTC.
+      TZ: ${TZ:-UTC}
+
+    healthcheck:
+      # The gateway's own endpoint, asked from inside the container so
+      # that it does not depend on the published port. wget is in busybox,
+      # so this needs nothing the image would not otherwise carry.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7788/api/health"]
+      interval: 30s
+      timeout: 5s
+      # Generous, because a first start writes a configuration and dials
+      # every configured upstream before it settles.
+      start_period: 20s
+      retries: 3
+
+    # Upstream stdio servers are child processes, and a child that outlives
+    # a crash would otherwise be reparented and linger. An init process
+    # reaps them.
+    init: true
+
+volumes:
+  mcphub-data:
