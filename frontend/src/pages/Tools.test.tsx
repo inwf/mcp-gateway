@@ -77,7 +77,9 @@ const VIEWS = [view('files'), view('bing')];
 
 function serving(forwarded = FORWARDED, own = OWN, views: unknown[] = VIEWS) {
   api.use(
-    http.get('/api/tools', () => HttpResponse.json({ tools: forwarded, total: forwarded.length })),
+    http.get('/api/tools', () =>
+      HttpResponse.json({ tools: forwarded, total: forwarded.length }),
+    ),
     http.get('/api/gateway/tools', () => HttpResponse.json(own)),
     http.get('/api/servers', () => HttpResponse.json({ servers: views })),
   );
@@ -369,7 +371,8 @@ describe('deciding what to expose', () => {
   });
 });
 
-describe('narrowing the list', () => {  // Picking a server asks about that server. The gateway's own tools are
+describe('narrowing the list', () => {
+  // Picking a server asks about that server. The gateway's own tools are
   // on no server, so they are not an answer to it.
   it("leaves out the other servers and the gateway's own tools", async () => {
     serving();
@@ -417,9 +420,7 @@ describe('narrowing the list', () => {  // Picking a server asks about that serv
 
     await screen.findByRole('heading', { name: 'bing' });
     api.use(
-      http.get('/api/tools', () =>
-        HttpResponse.json({ tools: [FORWARDED[0]], total: 1 }),
-      ),
+      http.get('/api/tools', () => HttpResponse.json({ tools: [FORWARDED[0]], total: 1 })),
     );
     await userEvent.type(screen.getByRole('searchbox'), 'disk');
 
@@ -519,6 +520,8 @@ describe('the layout toggle', () => {
     renderWithProviders(<Tools />);
 
     await screen.findByText('files_read');
+    await userEvent.click(screen.getByText('卡片'));
+    expect(within(group('files')).getByText('files_read')).toBeInTheDocument();
     await switchToList();
 
     // Still there, still under its own server.

@@ -60,9 +60,9 @@ describe('resolving the choice', () => {
 
   // An environment that cannot be asked gets this application's own
   // default, which is the same answer as a user who has said nothing.
-  it('falls back to dark where the question cannot be asked', () => {
+  it('falls back to light where the question cannot be asked', () => {
     vi.stubGlobal('matchMedia', undefined);
-    expect(resolveMode('system')).toBe('dark');
+    expect(resolveMode('system')).toBe('light');
   });
 });
 
@@ -82,22 +82,24 @@ describe('applying it to the document', () => {
 
 describe('what is remembered', () => {
   it('reads a stored choice', () => {
-    localStorage.setItem('mcphub.theme', JSON.stringify({ state: { choice: 'light' } }));
-    expect(storedChoice()).toBe('light');
+    for (const choice of ['light', 'dark', 'system'] as const) {
+      localStorage.setItem('mcphub.theme', JSON.stringify({ state: { choice } }));
+      expect(storedChoice()).toBe(choice);
+    }
   });
 
   // The stored value is whatever happens to be under that key, which is
   // not necessarily ours and not necessarily intact. None of that is
   // worth failing a page load over.
-  it('falls back to following the system rather than throwing', () => {
+  it('opens the light workbench when no valid preference is stored', () => {
     localStorage.setItem('mcphub.theme', 'not json at all');
-    expect(storedChoice()).toBe('system');
+    expect(storedChoice()).toBe('light');
 
     localStorage.setItem('mcphub.theme', JSON.stringify({ state: { choice: 'chartreuse' } }));
-    expect(storedChoice()).toBe('system');
+    expect(storedChoice()).toBe('light');
 
     localStorage.removeItem('mcphub.theme');
-    expect(storedChoice()).toBe('system');
+    expect(storedChoice()).toBe('light');
   });
 
   // Storing the resolved mode as well would leave a stale answer

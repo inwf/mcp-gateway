@@ -30,7 +30,7 @@ interface LayoutState {
 export const useToolLayoutStore = create<LayoutState>()(
   persist(
     (set) => ({
-      layout: 'cards',
+      layout: 'list',
       setLayout: (layout) => set({ layout }),
     }),
     { name: STORAGE_KEY },

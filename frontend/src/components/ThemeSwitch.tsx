@@ -43,7 +43,7 @@ export function ThemeSwitch() {
         label: (
           <Tooltip title={t(labelKey)}>
             <span role="img" aria-label={t(labelKey)}>
-              <Icon />
+              <Icon aria-hidden />
             </span>
           </Tooltip>
         ),

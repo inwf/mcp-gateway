@@ -1,43 +1,36 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Skeleton, Tooltip } from 'antd';
+import { App, Button, Skeleton } from 'antd';
 import {
-  ApiOutlined,
-  ClusterOutlined,
-  LinkOutlined,
-  ThunderboltOutlined,
+  ArrowRightOutlined,
+  CodeOutlined,
+  CopyOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
 import type { EventKind } from '@/api/stream';
 import { useEventStore } from '@/stores/events';
+import { PageHeading } from '@/components/PageHeading';
 import { Panel } from '@/components/Panel';
-import { StatCard, type Note } from '@/components/StatCard';
+import { StatCard } from '@/components/StatCard';
 import { StateBadge } from '@/components/StateBadge';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
-import { Reveal, SlideIn } from '@/components/Reveal';
-import { clockTime, fullTime, uptime } from '@/lib/format';
+import { clockTime, endpointOf, fullTime, uptime } from '@/lib/format';
 import { cx } from '@/lib/cx';
 import styles from './Overview.module.css';
 
-/** Which events are worth colouring, and how. A failure and a routine
- *  status change should not look alike in a list that is scanned. */
 const TONE: Partial<Record<EventKind, string | undefined>> = {
   'server.connected': styles.toneOk,
   'server.disconnected': styles.toneWarn,
   'server.failed': styles.toneDanger,
   'toolcall.failed': styles.toneDanger,
-  'toolcall.completed': styles.toneOk,
-  'config.updated': styles.toneInfo,
-  'tools.changed': styles.toneInfo,
-  'resources.changed': styles.toneInfo,
 };
 
 function Stats() {
   const { t } = useTranslation();
-
   const status = useQuery({
     queryKey: keys.gateway.status(),
     queryFn: endpoints.gatewayStatus,
@@ -45,10 +38,8 @@ function Stats() {
 
   if (status.isPending) {
     return (
-      <div className={styles.stats}>
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} active paragraph={{ rows: 2 }} title={false} />
-        ))}
+      <div className={styles.loading}>
+        <Skeleton active paragraph={{ rows: 2 }} title={false} />
       </div>
     );
   }
@@ -57,45 +48,24 @@ function Stats() {
   }
 
   const { servers, tools, sessions, sessionMode } = status.data;
-
-  // The failure count is the one figure here that should draw the eye
-  // when it is not zero, and should say nothing at all when it is.
-  const failureNote: { note: string; tone: Note } =
-    servers.failed > 0
-      ? { note: `${servers.failed} ${t('overview.failed')}`, tone: 'danger' }
-      : { note: '', tone: 'plain' };
-
   return (
-    <div className={styles.stats}>
-      <Reveal index={0}>
-        <StatCard
-          label={t('overview.servers')}
-          value={servers.configured}
-          note={t('overview.configured')}
-          Icon={ClusterOutlined}
-        />
-      </Reveal>
-      <Reveal index={1}>
-        <StatCard
-          label={t('overview.connected')}
-          value={servers.connected}
-          note={failureNote.note}
-          noteTone={failureNote.tone}
-          Icon={LinkOutlined}
-        />
-      </Reveal>
-      <Reveal index={2}>
-        <StatCard label={t('overview.tools')} value={tools} Icon={ThunderboltOutlined} />
-      </Reveal>
-      <Reveal index={3}>
-        <StatCard
-          label={t('overview.sessions')}
-          value={sessions}
-          note={sessionMode}
-          Icon={ApiOutlined}
-        />
-      </Reveal>
-    </div>
+    <dl className={styles.stats} aria-label={t('overview.metrics')}>
+      <StatCard
+        label={t('overview.servers')}
+        value={servers.configured}
+        note={t('overview.configured')}
+      />
+      <StatCard
+        label={t('overview.connected')}
+        value={servers.connected}
+        note={
+          servers.failed > 0 ? t('overview.failureCount', { count: servers.failed }) : undefined
+        }
+        noteTone={servers.failed > 0 ? 'danger' : 'plain'}
+      />
+      <StatCard label={t('overview.tools')} value={tools} note={t('overview.toolsHint')} />
+      <StatCard label={t('overview.sessions')} value={sessions} note={sessionMode} />
+    </dl>
   );
 }
 
@@ -106,28 +76,32 @@ function Activity() {
   return (
     <Panel
       title={t('overview.activity')}
-      count={events.length || undefined}
+      actions={
+        <Link className={styles.textLink} to="/logs">
+          {t('overview.viewLogs')}
+        </Link>
+      }
       flush
-      className={styles.feed}
     >
       {events.length === 0 ? (
         <Nothing title={t('overview.noActivity')} hint={t('overview.noActivityHint')} />
       ) : (
-        events.slice(0, 40).map((event) => (
-          // Keyed on the event's own id: several events from one
-          // upstream change share a timestamp.
-          <SlideIn key={event.id}>
-            <div className={cx(styles.row, TONE[event.kind])}>
-              <Tooltip title={fullTime(event.at)}>
-                <span className={styles.at}>{clockTime(event.at)}</span>
-              </Tooltip>
-              <span className={styles.what}>
-                <span className={styles.kind}>{t(`event.${event.kind}`)}</span>
-                {event.server ? <span className={styles.server}>{event.server}</span> : null}
-              </span>
-            </div>
-          </SlideIn>
-        ))
+        <ol className={styles.events}>
+          {events.slice(0, 8).map((event) => (
+            <li key={event.id} className={styles.event}>
+              <span className={cx(styles.eventDot, TONE[event.kind])} aria-hidden="true" />
+              <div className={styles.eventText}>
+                <span>{t(`event.${event.kind}`)}</span>
+                {event.server ? (
+                  <span className={styles.eventServer}>{event.server}</span>
+                ) : null}
+              </div>
+              <time className={styles.at} dateTime={event.at} title={fullTime(event.at)}>
+                {clockTime(event.at)}
+              </time>
+            </li>
+          ))}
+        </ol>
       )}
     </Panel>
   );
@@ -135,41 +109,117 @@ function Activity() {
 
 function Servers() {
   const { t } = useTranslation();
-
   const servers = useQuery({ queryKey: keys.servers.list(), queryFn: endpoints.listServers });
+  // Failed connections deserve the first rows; the full inventory remains
+  // on the servers page, so a large installation cannot bury the overview.
+  const shown = [...(servers.data ?? [])]
+    .sort(
+      (a, b) =>
+        Number(b.status.state === 'failed') - Number(a.status.state === 'failed') ||
+        a.name.localeCompare(b.name),
+    )
+    .slice(0, 8);
 
   return (
-    <Panel title={t('nav.servers')} count={servers.data?.length} flush>
+    <Panel
+      title={t('overview.upstreams')}
+      count={servers.data?.length}
+      actions={
+        <Link className={styles.textLink} to="/servers">
+          {t('overview.viewAll')} <ArrowRightOutlined aria-hidden />
+        </Link>
+      }
+      flush
+    >
       {servers.isPending ? (
-        <div style={{ padding: 'var(--space-4)' }}>
-          <Skeleton active paragraph={{ rows: 3 }} title={false} />
+        <div className={styles.loading}>
+          <Skeleton active paragraph={{ rows: 4 }} title={false} />
         </div>
       ) : servers.isError ? (
         <ErrorNotice error={servers.error} onRetry={() => void servers.refetch()} />
-      ) : servers.data.length === 0 ? (
-        <Nothing title={t('servers.empty')} hint={t('servers.emptyHint')} />
+      ) : shown.length === 0 ? (
+        <Nothing
+          title={t('servers.empty')}
+          hint={t('servers.emptyHint')}
+          action={
+            <Link className={styles.textLink} to="/servers">
+              {t('servers.add')} <ArrowRightOutlined aria-hidden />
+            </Link>
+          }
+        />
       ) : (
-        servers.data.map((server, index) => (
-          <Reveal key={server.name} index={index}>
+        <div>
+          <div className={styles.listHead} aria-hidden="true">
+            <span>{t('servers.name')}</span>
+            <span>{t('servers.tools')}</span>
+            <span>{t('servers.status')}</span>
+          </div>
+          {shown.map((server) => (
             <Link
+              key={server.name}
               to={`/servers/${encodeURIComponent(server.name)}/overview`}
               className={styles.serverRow}
             >
-              <span className={styles.serverName}>{server.name}</span>
-              <span className={styles.serverCount}>
-                {server.status.toolCount > 0
-                  ? `${server.status.toolCount} ${t('servers.tools')}`
-                  : '—'}
+              <span className={styles.serverInfo}>
+                <span className={styles.serverIcon} aria-hidden="true">
+                  {server.config.transport === 'stdio' ? <CodeOutlined /> : <GlobalOutlined />}
+                </span>
+                <span className={styles.serverText}>
+                  <span className={styles.serverName}>{server.name}</span>
+                  <span className={styles.serverEndpoint} title={endpointOf(server.config)}>
+                    {server.config.description || endpointOf(server.config)}
+                  </span>
+                </span>
               </span>
+              <span className={styles.serverCount}>{server.status.toolCount}</span>
               <StateBadge
                 state={server.status.state}
                 error={server.status.error}
                 enabled={server.config.enabled}
               />
             </Link>
-          </Reveal>
-        ))
+          ))}
+        </div>
       )}
+    </Panel>
+  );
+}
+
+function ClientConnection() {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  // Use the browser-visible origin so deployments behind a reverse proxy
+  // advertise the address clients can actually reach.
+  const endpoint = new URL('/mcp', window.location.href).href;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(endpoint);
+      void message.success(t('call.copied'));
+    } catch {
+      void message.error(t('common.copyFailed'));
+    }
+  };
+
+  return (
+    <Panel title={t('overview.connectClient')}>
+      <p className={styles.connectHint}>{t('overview.connectHint')}</p>
+      <input
+        className={styles.endpoint}
+        aria-label={t('overview.endpoint')}
+        value={endpoint}
+        readOnly
+        spellCheck={false}
+        onFocus={(event) => event.currentTarget.select()}
+      />
+      <Button
+        className={cx(styles.copy)}
+        icon={<CopyOutlined aria-hidden />}
+        onClick={() => void copy()}
+        block
+      >
+        {t('overview.copyEndpoint')}
+      </Button>
+      <p className={styles.endpointHint}>{t('overview.endpointHint')}</p>
     </Panel>
   );
 }
@@ -179,37 +229,41 @@ function Meta() {
   const health = useQuery({
     queryKey: keys.health,
     queryFn: endpoints.health,
-    // The uptime advances on its own, and this is the one figure on the
-    // page that no event will ever announce a change to.
     refetchInterval: 30_000,
   });
-
   if (!health.data) return null;
-
   return (
-    <div className={styles.meta}>
+    <footer className={styles.meta}>
       <span>
-        {t('overview.version')} <strong>{health.data.version}</strong>
+        mcphub <strong>{health.data.version}</strong>
       </span>
       <span>
         {t('overview.uptime')} <strong>{uptime(health.data.uptimeSeconds)}</strong>
       </span>
-      {health.data.connections !== undefined ? (
-        <span>
-          {t('connection.open')} <strong>{health.data.connections}</strong>
-        </span>
-      ) : null}
-    </div>
+    </footer>
   );
 }
 
 export default function Overview() {
+  const { t } = useTranslation();
   return (
     <div className={styles.page}>
+      <PageHeading
+        title={t('overview.title')}
+        description={t('overview.description')}
+        actions={
+          <Link className={styles.primaryLink} to="/servers">
+            {t('overview.manageServers')} <ArrowRightOutlined aria-hidden />
+          </Link>
+        }
+      />
       <Stats />
-      <div className={styles.split}>
-        <Activity />
+      <div className={styles.workspace}>
         <Servers />
+        <div className={styles.aside}>
+          <ClientConnection />
+          <Activity />
+        </div>
       </div>
       <Meta />
     </div>

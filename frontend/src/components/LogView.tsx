@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { App, Popconfirm, Segmented, Select, Switch, Tooltip } from 'antd';
+import { App, Popconfirm, Segmented, Select, Skeleton, Switch, Tooltip } from 'antd';
 import { ClearOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
@@ -124,6 +124,7 @@ export function LogView({
     <div className={styles.view}>
       <div className={styles.bar}>
         <Segmented
+          aria-label={t('logs.level')}
           value={level}
           onChange={(value) => setLevel(value as LogLevel | '')}
           options={[
@@ -133,6 +134,7 @@ export function LogView({
         />
 
         <Select
+          aria-label={t('logs.module')}
           value={module}
           onChange={setModule}
           style={{ minWidth: 130 }}
@@ -144,6 +146,7 @@ export function LogView({
 
         {server ? null : (
           <Select
+            aria-label={t('logs.server')}
             value={pickedServer}
             onChange={setPickedServer}
             style={{ minWidth: 150 }}
@@ -155,6 +158,7 @@ export function LogView({
         )}
 
         <Select
+          aria-label={t('logs.limit')}
           value={limit}
           onChange={setLimit}
           style={{ minWidth: 110 }}
@@ -168,7 +172,12 @@ export function LogView({
 
         <Tooltip title={t('logs.follow')}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <Switch size="small" checked={following} onChange={setFollowing} />
+            <Switch
+              aria-label={t('logs.follow')}
+              size="small"
+              checked={following}
+              onChange={setFollowing}
+            />
             <span className="label">{t('logs.follow')}</span>
           </span>
         </Tooltip>
@@ -208,8 +217,18 @@ export function LogView({
       {logs.isError ? (
         <ErrorNotice error={logs.error} onRetry={() => void logs.refetch()} />
       ) : (
-        <div className={styles.stream} ref={stream}>
-          {entries.length === 0 ? (
+        <div
+          className={styles.stream}
+          ref={stream}
+          role="region"
+          aria-label={t('logs.stream')}
+          tabIndex={0}
+        >
+          {logs.isPending ? (
+            <div className={styles.loading}>
+              <Skeleton active paragraph={{ rows: 5 }} title={false} />
+            </div>
+          ) : entries.length === 0 ? (
             <Nothing title={t('logs.empty')} />
           ) : (
             entries.map((entry, index) => (

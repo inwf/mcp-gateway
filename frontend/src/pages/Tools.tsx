@@ -2,15 +2,15 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Button, Input, Segmented, Select, Skeleton, Switch, Tooltip } from 'antd';
-import { ThunderboltOutlined } from '@ant-design/icons';
+import { SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
 import type { AggregatedTool, ServerView, Tool } from '@/api/types';
 import { Panel } from '@/components/Panel';
+import { PageHeading } from '@/components/PageHeading';
 import { StateBadge } from '@/components/StateBadge';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
-import { Reveal } from '@/components/Reveal';
 import { ToolCallDialog } from '@/components/ToolCallDialog';
 import { useExposure } from '@/hooks/use-exposure';
 import { useToolLayoutStore, type ToolLayout } from '@/stores/tool-layout';
@@ -101,7 +101,11 @@ function matching(tools: AggregatedTool[], search: string): AggregatedTool[] {
  * A group without a server view only exists because it has tools in it,
  * so there is nothing to explain in that case.
  */
-function emptyHint(view: ServerView | undefined, truncated: boolean, t: Translate): string | undefined {
+function emptyHint(
+  view: ServerView | undefined,
+  truncated: boolean,
+  t: Translate,
+): string | undefined {
   if (!view) return undefined;
 
   // The list stops at a limit, and it is ordered by exposed name — so on
@@ -149,12 +153,10 @@ function ExposeSwitch({ tool, view }: { tool: AggregatedTool; view: ServerView }
 
 function ToolCard({
   tool,
-  index,
   view,
   onCall,
 }: {
   tool: AggregatedTool;
-  index: number;
   /** The server this tool belongs to, absent for the gateway's own. */
   view?: ServerView | undefined;
   onCall: () => void;
@@ -164,42 +166,41 @@ function ToolCard({
   // The gateway prefixes and, on a collision, renames. What a client must
   // call is `exposed`, which is not always derivable from the upstream
   // name. A gateway tool has no server and is never renamed.
-  const renamed = tool.server !== '' && tool.exposed !== '' && !tool.exposed.endsWith(tool.tool);
+  const renamed =
+    tool.server !== '' && tool.exposed !== '' && !tool.exposed.endsWith(tool.tool);
   const on = tool.exposed !== '';
 
   return (
-    <Reveal index={index}>
-      <div className={cx(styles.card, !on && tool.server !== '' && styles.cardOff)}>
-        <div className={styles.head}>
-          {/* The name a client calls, where there is one. An unexposed
+    <div className={cx(styles.card, !on && tool.server !== '' && styles.cardOff)}>
+      <div className={styles.head}>
+        {/* The name a client calls, where there is one. An unexposed
               tool has none, so its own name is the headline instead —
               rather than an empty line where a name should be. */}
-          <span className={styles.exposed}>{tool.exposed || tool.tool}</span>
-          {view ? <ExposeSwitch tool={tool} view={view} /> : null}
-        </div>
-
-        {tool.description ? <p className={styles.description}>{tool.description}</p> : null}
-
-        <div className={styles.foot}>
-          {tool.server === '' ? (
-            <span className={styles.origin}>{t('tools.builtIn')}</span>
-          ) : on ? (
-            <Tooltip title={`${t('tools.from')} ${tool.server} · ${tool.tool}`}>
-              <span className={cx(styles.origin, renamed && styles.renamed)}>{tool.tool}</span>
-            </Tooltip>
-          ) : (
-            // The upstream name is already the headline for an unexposed
-            // tool, so repeating it here would say nothing. What is worth
-            // saying is the state, in words rather than only as a switch
-            // and a dashed border.
-            <span className={styles.origin}>{t('server.notExposed')}</span>
-          )}
-          <Button size="small" icon={<ThunderboltOutlined aria-hidden />} onClick={onCall}>
-            {t('tools.call')}
-          </Button>
-        </div>
+        <span className={styles.exposed}>{tool.exposed || tool.tool}</span>
+        {view ? <ExposeSwitch tool={tool} view={view} /> : null}
       </div>
-    </Reveal>
+
+      {tool.description ? <p className={styles.description}>{tool.description}</p> : null}
+
+      <div className={styles.foot}>
+        {tool.server === '' ? (
+          <span className={styles.origin}>{t('tools.builtIn')}</span>
+        ) : on ? (
+          <Tooltip title={`${t('tools.from')} ${tool.server} · ${tool.tool}`}>
+            <span className={cx(styles.origin, renamed && styles.renamed)}>{tool.tool}</span>
+          </Tooltip>
+        ) : (
+          // The upstream name is already the headline for an unexposed
+          // tool, so repeating it here would say nothing. What is worth
+          // saying is the state, in words rather than only as a switch
+          // and a dashed border.
+          <span className={styles.origin}>{t('server.notExposed')}</span>
+        )}
+        <Button size="small" icon={<ThunderboltOutlined aria-hidden />} onClick={onCall}>
+          {t('tools.call')}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -227,7 +228,7 @@ function ToolRow({
   const renamed = tool.server !== '' && on && !tool.exposed.endsWith(tool.tool);
 
   return (
-    <div className={cx(styles.row, !on && tool.server !== '' && styles.rowOff)}>
+    <div role="listitem" className={cx(styles.row, !on && tool.server !== '' && styles.rowOff)}>
       <span className={styles.rowName}>{tool.exposed || tool.tool}</span>
 
       {/* The provenance column. A gateway tool has no server; an unexposed
@@ -241,7 +242,9 @@ function ToolRow({
         <span className={styles.rowOrigin}>{t('server.notExposed')}</span>
       )}
 
-      <span className={styles.rowDescription}>{tool.description ?? ''}</span>
+      <span className={styles.rowDescription} title={tool.description}>
+        {tool.description ?? ''}
+      </span>
 
       <span className={styles.rowActions}>
         {view ? <ExposeSwitch tool={tool} view={view} /> : null}
@@ -272,30 +275,38 @@ function ToolGroup({
   layout: ToolLayout;
   onCall: (tool: AggregatedTool) => void;
 }) {
+  const { t } = useTranslation();
   // Keyed by origin, not by exposed name: every unexposed tool has the
   // same empty one.
   if (layout === 'list') {
     return (
       <div className={styles.list}>
-        {tools.map((tool) => (
-          <ToolRow
-            key={`${tool.server}/${tool.tool}`}
-            tool={tool}
-            view={view}
-            onCall={() => onCall(tool)}
-          />
-        ))}
+        <div className={styles.listHead} aria-hidden="true">
+          <span>{t('tools.name')}</span>
+          <span className={styles.rowOrigin}>{t('tools.upstreamName')}</span>
+          <span>{t('tools.summary')}</span>
+          <span>{t('servers.actions')}</span>
+        </div>
+        <div role="list">
+          {tools.map((tool) => (
+            <ToolRow
+              key={`${tool.server}/${tool.tool}`}
+              tool={tool}
+              view={view}
+              onCall={() => onCall(tool)}
+            />
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
     <div className={styles.grid}>
-      {tools.map((tool, index) => (
+      {tools.map((tool) => (
         <ToolCard
           key={`${tool.server}/${tool.tool}`}
           tool={tool}
-          index={index}
           view={view}
           onCall={() => onCall(tool)}
         />
@@ -376,7 +387,9 @@ export default function Tools() {
     // That should not happen, and dropping tools without saying so would
     // be a worse way to find out than an unadorned group.
     const known = new Set(views.map((view) => view.name));
-    const orphans = [...buckets.keys()].filter((name) => name !== '' && !known.has(name)).sort();
+    const orphans = [...buckets.keys()]
+      .filter((name) => name !== '' && !known.has(name))
+      .sort();
 
     const named: { name: string; view?: ServerView | undefined }[] = [
       ...views.map((view) => ({ name: view.name, view })),
@@ -423,10 +436,12 @@ export default function Tools() {
   // back where it was.
   const searching = search.trim() !== '';
   const isOpen = (key: string) => searching || !collapsed.includes(key);
+  const heading = <PageHeading title={t('tools.title')} description={t('tools.description')} />;
 
   if (failure) {
     return (
       <div className={styles.page}>
+        {heading}
         <ErrorNotice
           error={failure}
           onRetry={() => {
@@ -441,15 +456,20 @@ export default function Tools() {
 
   return (
     <div className={styles.page}>
+      {heading}
       <div className={styles.bar}>
-        <Input.Search
+        <Input
+          type="search"
+          prefix={<SearchOutlined aria-hidden />}
+          aria-label={t('tools.search')}
           allowClear
           placeholder={t('tools.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ maxWidth: 320 }}
+          className={cx(styles.search)}
         />
         <Select
+          aria-label={t('logs.server')}
           value={server}
           onChange={setServer}
           style={{ minWidth: 170 }}
@@ -483,6 +503,7 @@ export default function Tools() {
             // what a first visit should land on.
             <Panel
               title={t('tools.system')}
+              flush={layout === 'list'}
               count={shownSystem.length}
               actions={<span className={styles.mark}>{t('tools.builtIn')}</span>}
               collapsible
@@ -496,6 +517,7 @@ export default function Tools() {
           {shown.map((group) => (
             <Panel
               key={group.server}
+              flush={layout === 'list'}
               title={<span className={styles.serverName}>{group.server}</span>}
               // An empty group's body is the sentence explaining why it is
               // empty, which is the only thing it has to say. Folding that
@@ -525,7 +547,10 @@ export default function Tools() {
               }
             >
               {group.tools.length === 0 ? (
-                <Nothing title={t('tools.groupEmpty')} hint={emptyHint(group.view, truncated, t)} />
+                <Nothing
+                  title={t('tools.groupEmpty')}
+                  hint={emptyHint(group.view, truncated, t)}
+                />
               ) : (
                 <ToolGroup
                   tools={group.tools}

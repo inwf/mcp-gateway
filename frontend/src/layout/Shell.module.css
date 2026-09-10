@@ -1,131 +1,155 @@
 .shell {
-  position: relative;
-  z-index: 1;
   display: grid;
-  grid-template-columns: var(--rail-width) 1fr;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100%;
-  /* Grid items are allowed to shrink below their content. Without this a
-     tall page pushes the shell past the window instead of letting the
-     pane inside it scroll — and the body clips what is pushed out, so it
-     becomes unreachable rather than merely off screen. */
   min-height: 0;
 }
 
-/* ===== the rail =====
- *
- * A narrow column of icons rather than a bar of labelled links across
- * the top. It gives the content the full height of the window, which is
- * what a log viewer and a tool list both want, and it is the single
- * decision that most changes how the application reads at a glance.
- */
-.rail {
+.sidebar {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) 0;
+  gap: var(--space-6);
+  min-height: 0;
+  padding: 25px 14px 18px;
   border-right: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--chrome-a), var(--chrome-b));
-  backdrop-filter: blur(14px);
+  background: var(--sidebar);
 }
 
-.mark {
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.symbol {
   display: grid;
   place-items: center;
+  flex: none;
   width: 34px;
-  height: 34px;
-  margin-bottom: var(--space-3);
+  height: 36px;
   border-radius: var(--radius);
-  background: linear-gradient(145deg, var(--accent), var(--mark-b));
-  color: var(--ink-inverse);
-  font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 700;
-  text-decoration: none;
-  box-shadow: 0 0 22px var(--accent-glow);
-  transition: transform var(--fast) var(--ease);
+  background: var(--ink);
+  color: var(--void);
 }
 
-.mark:hover {
-  transform: translateY(-1px) scale(1.04);
+.wordmark {
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.045em;
+}
+
+.wordmark > span {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+}
+
+.navigation {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.groupLabel {
+  margin: 0 12px 8px;
+  color: var(--ink-faint);
+  font-size: 11px;
 }
 
 .item {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 38px;
-  border: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 9px 12px;
   border-radius: var(--radius);
-  background: transparent;
-  color: var(--ink-faint);
-  font-size: 17px;
-  cursor: pointer;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  text-decoration: none;
   transition:
-    color var(--fast) var(--ease),
-    background var(--fast) var(--ease);
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.itemIcon {
+  display: flex;
+  font-size: 16px;
 }
 
 .item:hover {
-  color: var(--ink-muted);
   background: var(--lift-strong);
+  color: var(--ink);
 }
 
-.active {
-  color: var(--accent);
+.active,
+.active:hover {
   background: var(--accent-dim);
-}
-
-/* The marker for the current section: a short bar against the rail's
-   inner edge. A filled block behind the icon would compete with the
-   icon itself at this size. */
-.active::before {
-  content: '';
-  position: absolute;
-  left: -13px;
-  width: 2px;
-  height: 18px;
-  border-radius: 0 2px 2px 0;
-  background: var(--accent);
-  box-shadow: 0 0 10px var(--accent);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .spacer {
   flex: 1;
+  min-height: var(--space-6);
 }
 
-/* ===== main column ===== */
+.instance {
+  display: grid;
+  gap: 5px;
+  margin: 0 10px;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+.instanceLabel {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.host {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .main {
   display: grid;
-  grid-template-rows: var(--topbar-height) 1fr;
-  min-width: 0; /* lets wide children scroll rather than stretch the grid */
-  min-height: 0; /* and the same for tall ones */
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
   height: 100%;
 }
 
 .topbar {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: 0 var(--space-5);
+  gap: 12px;
+  padding: 0 var(--space-6);
   border-bottom: 1px solid var(--line);
-  background: var(--chrome-flat);
-  backdrop-filter: blur(14px);
+  background: var(--void);
+  font-size: var(--text-xs);
 }
 
-.title {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.crumb {
+.crumb,
+.separator {
   color: var(--ink-faint);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
+}
+
+.section {
+  color: var(--ink-muted);
 }
 
 .topbarRight {
@@ -135,102 +159,135 @@
   margin-left: auto;
 }
 
-/* The one scrolling pane. Everything above it is fixed to the window, so
-   this is where a page taller than the window has to scroll. */
+.divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+
+/* The height chain ends here; long pages scroll without hiding navigation. */
 .content {
   min-width: 0;
   min-height: 0;
-  padding: var(--space-5);
+  padding: var(--space-6);
   overflow: auto;
+  scroll-padding-top: var(--space-5);
 }
 
-/* ===== connection indicator ===== */
+.content > * {
+  max-width: 1440px;
+  margin-inline: auto;
+}
 
-.link {
+.connection {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 7px;
   color: var(--ink-muted);
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--ink-faint);
 }
 
-.dotOpen {
+.open {
   background: var(--ok);
-  box-shadow: 0 0 0 3px var(--ok-dim);
-  animation: pulse 2.6s var(--ease) infinite;
 }
-
-.dotConnecting {
+.connecting {
   background: var(--warn);
-  box-shadow: 0 0 0 3px var(--warn-dim);
-  animation: pulse 1s var(--ease) infinite;
 }
-
-.dotClosed {
+.closed {
   background: var(--danger);
-  box-shadow: 0 0 0 3px var(--danger-dim);
 }
 
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.42;
-  }
+.skip {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 8px 16px;
+  background: var(--surface);
+  color: var(--accent);
+  transform: translateY(-160%);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dotOpen,
-  .dotConnecting {
-    animation: none;
-  }
+.skip:focus {
+  transform: none;
 }
 
-/* ===== narrow windows =====
-   The rail becomes a bottom bar rather than disappearing: on a narrow
-   window the nav is what is reached for most, and a hamburger would put
-   it two taps away. */
-@media (max-width: 720px) {
+@media (max-width: 1100px) {
   .shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr auto;
+    grid-template-columns: 184px minmax(0, 1fr);
+  }
+  .content {
+    padding: var(--space-5);
+  }
+  .topbar {
+    padding-inline: var(--space-5);
+  }
+}
+
+@media (max-width: 760px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
-  .rail {
+  .sidebar {
     grid-row: 2;
-    flex-direction: row;
-    justify-content: space-around;
-    padding: var(--space-2) var(--space-3);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
     border-right: 0;
   }
 
-  .mark,
-  .spacer {
+  .brand,
+  .groupLabel,
+  .spacer,
+  .instance {
     display: none;
   }
 
-  .active::before {
-    top: -9px;
-    left: auto;
-    width: 18px;
-    height: 2px;
-    border-radius: 0 0 2px 2px;
+  .navigation {
+    flex-direction: row;
+    justify-content: space-around;
+    gap: 3px;
+    overflow: visible;
   }
 
+  .item {
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+    padding: 7px 4px;
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  .itemIcon {
+    font-size: 18px;
+  }
   .content {
-    padding: var(--space-4);
+    padding: 22px 16px;
+  }
+  .topbar {
+    padding-inline: var(--space-4);
+    gap: 8px;
+  }
+  .topbarRight {
+    gap: 10px;
+  }
+  .divider {
+    display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .crumb,
+  .separator {
+    display: none;
   }
 }

@@ -1,8 +1,3 @@
-/*
- * Everything that is not a component: the page floor, the animated
- * field behind it, and the handful of primitives used across pages.
- */
-
 *,
 *::before,
 *::after {
@@ -21,104 +16,37 @@ body {
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--text-base);
-  line-height: 1.55;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
-/* ===== the field =====
- *
- * The moving ground the console sits on. Three offset radial washes
- * drifting at different rates, plus a fine grid and a grain overlay.
- *
- * This is CSS rather than WebGL on purpose: a canvas here would mean a
- * rendering library in the bundle and a GPU kept awake for the whole
- * session, to produce something a few gradients already produce. It
- * composites on the GPU as it is, and costs nothing when the tab is
- * hidden.
- */
-.field {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-  background: var(--void);
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
-.field::before {
-  content: '';
-  position: absolute;
-  inset: -30%;
-  background:
-    radial-gradient(46% 38% at 22% 18%, var(--field-wash-1) 0%, transparent 62%),
-    radial-gradient(40% 44% at 82% 26%, var(--field-wash-2) 0%, transparent 64%),
-    radial-gradient(52% 40% at 58% 92%, var(--field-wash-3) 0%, transparent 68%);
-  filter: blur(38px);
-  animation: drift 44s var(--ease) infinite alternate;
-}
-
-/* The grid reads as instrumentation, and gives the washes something to
-   sit against so they do not look like a smear. */
-.field::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(var(--field-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--field-grid) 1px, transparent 1px);
-  background-size: 46px 46px;
-  mask-image: radial-gradient(120% 90% at 50% 0%, #000 25%, transparent 78%);
-}
-
-@keyframes drift {
-  from {
-    transform: translate3d(-3%, -2%, 0) scale(1);
-  }
-  to {
-    transform: translate3d(4%, 3%, 0) scale(1.14);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .field::before {
-    animation: none;
-  }
-}
-
-/* ===== primitives ===== */
-
-/* Any value the machine produced — a name, a count, a time, a path.
-   Tabular figures so that columns of numbers line up and a counter
-   ticking upward does not jiggle its neighbours. */
 .mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-feature-settings: 'zero' 1;
-  letter-spacing: -0.01em;
 }
 
-/* A section label. Small, spaced, quiet — it names a region without
-   competing with the data in it. */
 .label {
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
+  font-weight: 500;
+  color: var(--ink-muted);
 }
 
-/* ===== scrollbars =====
-   The default light scrollbar on a near-black page is a bright stripe
-   down the side of every panel. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
 }
 
 *::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
 }
 
 *::-webkit-scrollbar-track {
@@ -129,7 +57,7 @@ body {
   background: var(--scroll-thumb);
   border: 2px solid transparent;
   background-clip: content-box;
-  border-radius: 99px;
+  border-radius: var(--radius);
 }
 
 *::-webkit-scrollbar-thumb:hover {
@@ -137,17 +65,13 @@ body {
   background-clip: content-box;
 }
 
-/* ===== focus =====
-   One visible focus ring everywhere, keyboard-only. Without this the
-   dark theme swallows the default outline and the app becomes
-   unusable without a mouse. */
 :focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 3px;
   border-radius: var(--radius-sm);
 }
 
 ::selection {
-  background: var(--accent-glow);
+  background: var(--selection);
   color: var(--ink);
 }

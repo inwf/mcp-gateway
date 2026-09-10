@@ -10,6 +10,10 @@ export const zh = {
   app: {
     name: 'MCPHUB',
     tagline: 'MCP 网关控制台',
+    workspace: '工作空间',
+    manage: '管理',
+    instance: '当前实例',
+    skipContent: '跳到主要内容',
   },
 
   nav: {
@@ -38,6 +42,19 @@ export const zh = {
 
   overview: {
     title: '总览',
+    description: '上游连接、工具与会话，一眼了解网关的运行状态。',
+    metrics: '网关运行统计',
+    upstreams: '上游服务器',
+    manageServers: '管理服务器',
+    viewAll: '查看全部',
+    connectClient: '接入客户端',
+    connectHint: '在 MCP 客户端中选择 Streamable HTTP，使用下方地址连接。',
+    endpoint: 'MCP 接入地址',
+    copyEndpoint: '复制地址',
+    endpointHint: '客户端只需配置这个入口，即可使用网关提供的工具。',
+    toolsHint: '客户端可发现',
+    failureCount: '{{count}} 台连接失败',
+    viewLogs: '查看日志',
     servers: '服务器',
     connected: '已连接',
     tools: '已暴露工具',
@@ -45,7 +62,7 @@ export const zh = {
     failed: '失败',
     configured: '已配置',
     sessionMode: '会话模式',
-    activity: '实时事件',
+    activity: '最近事件',
     noActivity: '暂无事件',
     noActivityHint: '网关运行期间发生的变化会出现在这里',
     uptime: '运行时长',
@@ -67,6 +84,14 @@ export const zh = {
 
   servers: {
     title: '服务器',
+    description: '管理上游连接，查看每台服务器提供的工具与资源。',
+    filterStatus: '按连接状态筛选',
+    inventory: '连接列表',
+    noMatch: '没有匹配的服务器',
+    removeTag: '移除标签筛选 {{tag}}',
+    all: '全部',
+    clearFilters: '清除筛选',
+    filtered: '显示 {{shown}} / {{total}} 台服务器',
     add: '添加服务器',
     empty: '还没有配置任何 MCP 服务器',
     emptyHint: '添加一台之后，就能选择把它的哪些工具暴露给客户端',
@@ -148,18 +173,22 @@ export const zh = {
     descriptionHint: '会提供给模型，帮助它选择正确的服务器',
     tags: '标签',
     exposedTools: '暴露的工具',
-    exposedToolsHint: '只有勾选的工具会出现在客户端的工具列表里。没勾的仍然能用 call_tool 调到，只是不占上下文。',
+    exposedToolsHint:
+      '只有勾选的工具会出现在客户端的工具列表里。没勾的仍然能用 call_tool 调到，只是不占上下文。',
     exposedToolsAll: '全选',
     exposedToolsEveryOne: '一个都没勾 = 不出现在工具列表里（仍可用 call_tool 调用）',
     exposedToolsCount: '已选 {{count}} / {{total}}',
     exposedToolsNone: '这台服务器没有提供任何工具',
-    exposedToolsOffline: '服务器未连接，读不到它的工具列表，只能手写名字。连上之后这里会变成勾选。',
-    exposedToolsUnsaved: '服务器还没创建，读不到它的工具列表。创建并连接之后，回到这里就能勾选。',
+    exposedToolsOffline:
+      '服务器未连接，读不到它的工具列表，只能手写名字。连上之后这里会变成勾选。',
+    exposedToolsUnsaved:
+      '服务器还没创建，读不到它的工具列表。创建并连接之后，回到这里就能勾选。',
     exposedToolsMissing: '配置里有，但这台服务器当前并不提供：',
     asForm: '表单',
     asJson: 'JSON',
     json: '服务器配置',
-    jsonHint: '可以只写用到的字段，其余按默认值处理。也接受 {"mcpServers": {"名字": {…}}} 这种包了一层的写法（只能有一台；多台请用批量导入）。',
+    jsonHint:
+      '可以只写用到的字段，其余按默认值处理。也接受 {"mcpServers": {"名字": {…}}} 这种包了一层的写法（只能有一台；多台请用批量导入）。',
     jsonNotAnObject: '这不是一个 JSON 对象',
     jsonOneServer: '这里只能编辑一台服务器；多台请用「批量导入」',
     enabled: '启动时自动连接',
@@ -175,6 +204,10 @@ export const zh = {
 
   tools: {
     title: '工具',
+    description: '按服务器浏览工具，调整暴露范围，或直接发起调用。',
+    name: '工具名称',
+    upstreamName: '上游名称',
+    summary: '说明',
     search: '搜索工具',
     empty: '没有可用的工具',
     emptyHint: '连接一个 MCP 服务器后，它的工具会出现在这里',
@@ -217,6 +250,8 @@ export const zh = {
 
   resources: {
     title: '资源',
+    description: '浏览上游提供的资源，选择一项查看内容。',
+    search: '搜索名称或资源 URI',
     empty: '没有可用的资源',
     emptyHint: '并非所有 MCP 服务器都提供资源',
     uri: '标识',
@@ -227,6 +262,8 @@ export const zh = {
 
   logs: {
     title: '日志',
+    description: '按级别、模块和服务器筛选，追踪网关的运行记录。',
+    stream: '日志记录',
     level: '级别',
     module: '模块',
     server: '服务器',
@@ -248,13 +285,21 @@ export const zh = {
 
   settings: {
     title: '设置',
+    description: '调整网关的监听地址、访问规则与运行参数。',
+    listenHint: '网关对外提供服务的地址。修改后需要重启生效。',
+    loggingHint: '控制记录哪些信息，以及日志文件的保留方式。',
+    securityHint: '设置允许访问的来源，以及连接和并发限制。',
+    gatewayHint: '管理客户端会话、通知与连接保活。',
+    startupHint: '设置上游启动时的连接间隔和失败重试。',
+    unsaved: '有未保存的修改',
     form: '表单',
     yaml: 'YAML',
     path: '配置文件',
     export: '导出',
     exportRedacted: '导出（隐去密钥）',
     exportSecrets: '导出（含密钥）',
-    exportSecretsHint: '文件里会包含请求头与环境变量中的密钥原文。用于备份或迁移；不要贴到 issue 或聊天里。',
+    exportSecretsHint:
+      '文件里会包含请求头与环境变量中的密钥原文。用于备份或迁移；不要贴到 issue 或聊天里。',
     listen: '监听',
     logging: '日志',
     security: '安全',
@@ -324,6 +369,8 @@ export const zh = {
     yes: '是',
     no: '否',
     total: '共 {{count}} 项',
+    copyFailed: '复制失败，请选中内容后手动复制',
+    noMatches: '没有符合条件的结果',
     justNow: '刚刚',
     secondsAgo: '{{count}} 秒前',
     minutesAgo: '{{count}} 分钟前',

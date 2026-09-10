@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { Panel } from '@/components/Panel';
+import { PageHeading } from '@/components/PageHeading';
 import { LogView } from '@/components/LogView';
+import styles from './Logs.module.css';
 
 /**
  * The whole log.
@@ -13,8 +15,11 @@ export default function Logs() {
   const { t } = useTranslation();
 
   return (
-    <Panel title={t('logs.title')}>
-      <LogView />
-    </Panel>
+    <div className={styles.page}>
+      <PageHeading title={t('logs.title')} description={t('logs.description')} />
+      <Panel title={t('logs.stream')} className={styles.panel}>
+        <LogView />
+      </Panel>
+    </div>
   );
 }

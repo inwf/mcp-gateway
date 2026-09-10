@@ -1,0 +1,12 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  height: 100%;
+  min-height: 440px;
+}
+
+.panel {
+  flex: 1;
+  min-height: 320px;
+}

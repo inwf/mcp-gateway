@@ -27,29 +27,3 @@ globalThis.ResizeObserver ??= class {
   unobserve() {}
   disconnect() {}
 };
-
-// motion's useInView, which the count-up uses to start only once the
-// figure is on screen. Reported as visible: a figure that never counts
-// is invisible to a test that asserts on it.
-globalThis.IntersectionObserver ??= class {
-  readonly root = null;
-  readonly rootMargin = '';
-  readonly thresholds: ReadonlyArray<number> = [];
-  private readonly callback: IntersectionObserverCallback;
-
-  constructor(callback: IntersectionObserverCallback) {
-    this.callback = callback;
-  }
-
-  observe(target: Element) {
-    this.callback(
-      [{ isIntersecting: true, target } as unknown as IntersectionObserverEntry],
-      this as unknown as IntersectionObserver,
-    );
-  }
-  unobserve() {}
-  disconnect() {}
-  takeRecords(): IntersectionObserverEntry[] {
-    return [];
-  }
-} as unknown as typeof IntersectionObserver;

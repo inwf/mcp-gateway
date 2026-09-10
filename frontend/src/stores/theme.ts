@@ -25,13 +25,11 @@ export type ThemeMode = 'light' | 'dark';
 const STORAGE_KEY = 'mcphub.theme';
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
+const DEFAULT_CHOICE: ThemeChoice = 'light';
 
-/** What the system currently prefers, defaulting to dark where the
- *  question cannot be asked — that is this application's own default, so
- *  an environment without matchMedia gets the same answer as one whose
- *  user has expressed no preference. */
+/** If the system cannot be queried, use the workbench's light palette. */
 export function systemMode(): ThemeMode {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'dark';
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';
   return window.matchMedia(DARK_QUERY).matches ? 'dark' : 'light';
 }
 
@@ -54,8 +52,8 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set, get) => ({
-      choice: 'system',
-      mode: systemMode(),
+      choice: DEFAULT_CHOICE,
+      mode: resolveMode(DEFAULT_CHOICE),
 
       setChoice: (choice) => set({ choice, mode: resolveMode(choice) }),
       resync: () => set({ mode: resolveMode(get().choice) }),
@@ -96,13 +94,15 @@ export function applyMode(mode: ThemeMode): void {
 export function storedChoice(): ThemeChoice {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return 'system';
+    if (!raw) return DEFAULT_CHOICE;
     const parsed = JSON.parse(raw) as { state?: { choice?: unknown } };
     const choice = parsed.state?.choice;
-    return choice === 'light' || choice === 'dark' ? choice : 'system';
+    return choice === 'light' || choice === 'dark' || choice === 'system'
+      ? choice
+      : DEFAULT_CHOICE;
   } catch {
     // A quota error, a disabled store, or something else's data under our
     // key. None of them is worth failing a page load over.
-    return 'system';
+    return DEFAULT_CHOICE;
   }
 }

@@ -3,16 +3,16 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { Input, Select, Skeleton } from 'antd';
-import { CopyOutlined } from '@ant-design/icons';
+import { CopyOutlined, SearchOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
 import type { AggregatedResource, ContentBlock } from '@/api/types';
 import { Panel } from '@/components/Panel';
+import { PageHeading } from '@/components/PageHeading';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
 import { IconButton } from '@/components/IconButton';
-import { Reveal } from '@/components/Reveal';
 import { cx } from '@/lib/cx';
 import styles from './Resources.module.css';
 
@@ -23,7 +23,13 @@ function Content({ block }: { block: ContentBlock }) {
   if (typeof block.text === 'string') return <pre className={styles.content}>{block.text}</pre>;
 
   if (typeof block.blob === 'string' && block.mimeType?.startsWith('image/')) {
-    return <img className={styles.image} src={`data:${block.mimeType};base64,${block.blob}`} alt="" />;
+    return (
+      <img
+        className={styles.image}
+        src={`data:${block.mimeType};base64,${block.blob}`}
+        alt=""
+      />
+    );
   }
   return <pre className={styles.content}>{JSON.stringify(block, null, 2)}</pre>;
 }
@@ -49,7 +55,7 @@ function Viewer({ resource }: { resource: AggregatedResource }) {
 
   return (
     <Panel
-      title={t('resources.content')}
+      title={resource.name || t('resources.content')}
       actions={
         <IconButton
           label={t('call.copy')}
@@ -60,6 +66,7 @@ function Viewer({ resource }: { resource: AggregatedResource }) {
       }
     >
       <div className={styles.facts}>
+        <span className={styles.resourceUri}>{resource.uri}</span>
         <span>{resource.server}</span>
         <span>{resource.mimeType ?? '—'}</span>
       </div>
@@ -121,25 +128,51 @@ export default function Resources() {
     setParams(next, { replace: true });
   };
 
-  if (resources.isPending) return <Skeleton active paragraph={{ rows: 6 }} />;
+  const heading = (
+    <PageHeading title={t('resources.title')} description={t('resources.description')} />
+  );
+  if (resources.isPending)
+    return (
+      <div className={styles.page}>
+        {heading}
+        <Skeleton active paragraph={{ rows: 6 }} />
+      </div>
+    );
   if (resources.isError) {
-    return <ErrorNotice error={resources.error} onRetry={() => void resources.refetch()} />;
+    return (
+      <div className={styles.page}>
+        {heading}
+        <ErrorNotice error={resources.error} onRetry={() => void resources.refetch()} />
+      </div>
+    );
   }
   if (resources.data.length === 0) {
-    return <Nothing title={t('resources.empty')} hint={t('resources.emptyHint')} />;
+    return (
+      <div className={styles.page}>
+        {heading}
+        <Panel title={t('resources.title')} count={0}>
+          <Nothing title={t('resources.empty')} hint={t('resources.emptyHint')} />
+        </Panel>
+      </div>
+    );
   }
 
   return (
     <div className={styles.page}>
+      {heading}
       <div className={styles.bar}>
-        <Input.Search
+        <Input
+          type="search"
+          prefix={<SearchOutlined aria-hidden />}
+          aria-label={t('resources.search')}
           allowClear
-          placeholder={t('resources.uri')}
+          placeholder={t('resources.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ maxWidth: 300 }}
+          className={cx(styles.search)}
         />
         <Select
+          aria-label={t('logs.server')}
           value={fromServer}
           onChange={(value) => {
             const next = new URLSearchParams(params);
@@ -158,36 +191,43 @@ export default function Resources() {
       </div>
 
       <div className={styles.split}>
-        <Panel title={t('resources.title')} count={shown.length} flush>
+        <Panel
+          title={t('resources.title')}
+          count={shown.length}
+          className={styles.catalog}
+          flush
+        >
           {shown.length === 0 ? (
-            <Nothing title={t('tools.noMatch')} />
+            <Nothing title={t('common.noMatches')} />
           ) : (
-            shown.map((resource, index) => (
-              <Reveal key={`${resource.server}/${resource.uri}`} index={index}>
-                <button
-                  type="button"
-                  className={cx(
-                    styles.row,
-                    resource.uri === selected?.uri &&
-                      resource.server === selected?.server &&
-                      styles.rowOn,
-                  )}
-                  onClick={() => select(resource)}
-                >
-                  <span>
-                    <span className={styles.uri}>{resource.uri}</span>
-                    {resource.name || resource.description ? (
-                      <span className={styles.name}>{resource.name ?? resource.description}</span>
-                    ) : null}
-                  </span>
-                  <span className={styles.from}>{resource.server}</span>
-                </button>
-              </Reveal>
+            shown.map((resource) => (
+              <button
+                key={`${resource.server}/${resource.uri}`}
+                type="button"
+                aria-pressed={
+                  resource.uri === selected?.uri && resource.server === selected?.server
+                }
+                className={cx(
+                  styles.row,
+                  resource.uri === selected?.uri &&
+                    resource.server === selected?.server &&
+                    styles.rowOn,
+                )}
+                onClick={() => select(resource)}
+              >
+                <span className={styles.itemText}>
+                  <span className={styles.name}>{resource.name || resource.uri}</span>
+                  {resource.name ? <span className={styles.uri}>{resource.uri}</span> : null}
+                </span>
+                <span className={styles.from}>{resource.server}</span>
+              </button>
             ))
           )}
         </Panel>
 
-        {selected ? <Viewer key={`${selected.server}/${selected.uri}`} resource={selected} /> : null}
+        {selected ? (
+          <Viewer key={`${selected.server}/${selected.uri}`} resource={selected} />
+        ) : null}
       </div>
     </div>
   );

@@ -48,7 +48,6 @@ export function App() {
       <AntApp style={{ height: '100%' }}>
         <QueryClientProvider client={queryClient}>
           <StreamKeeper>
-            <div className="field" aria-hidden="true" />
             <RouterProvider router={router} />
           </StreamKeeper>
         </QueryClientProvider>

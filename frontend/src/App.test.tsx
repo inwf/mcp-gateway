@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '@/test/harness';
@@ -85,9 +86,9 @@ describe('the application', () => {
     visit('/');
 
     await waitFor(() => expect(screen.getByText('已暴露工具')).toBeInTheDocument(), LAZY);
-    // The count-up starts at zero and settles on the value, so this
-    // waits for the figure rather than asserting the first frame.
-    await waitFor(() => expect(screen.getByText('7')).toBeInTheDocument(), LAZY);
+    // The server inventory also contains tool counts; assert the gateway
+    // total in its metrics, where clients' exposed tools are reported.
+    expect(within(screen.getByLabelText('网关运行统计')).getByText('7')).toBeInTheDocument();
   });
 
   it('shows the servers page with its add button', async () => {
@@ -101,6 +102,18 @@ describe('the application', () => {
       LAZY,
     );
     expect(await screen.findByText('files')).toBeInTheDocument();
+  });
+
+  it('copies the client endpoint using the address visible to the browser', async () => {
+    const user = userEvent.setup();
+    visit('/');
+
+    await user.click(await screen.findByRole('button', { name: '复制地址' }));
+    // The listener's internal address would be wrong behind a reverse proxy.
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/mcp`);
+    expect(screen.getByRole('textbox', { name: 'MCP 接入地址' })).toHaveValue(
+      `${window.location.origin}/mcp`,
+    );
   });
 
   it('reports an unknown path rather than rendering nothing', async () => {

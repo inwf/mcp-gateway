@@ -48,7 +48,7 @@ export function Panel({
       {/* A heading element rather than a styled span: these are the
           only headings on most pages, and a reader that cannot see
           the panel's border has nothing else to navigate by. */}
-      <h2 className={cx('label', styles.heading)}>{title}</h2>
+      <h2 className={styles.heading}>{title}</h2>
       {count !== undefined ? <span className={styles.count}>{count}</span> : null}
     </>
   );

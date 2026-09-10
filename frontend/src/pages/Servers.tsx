@@ -6,19 +6,22 @@ import { Button, Input, Popconfirm, Skeleton, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   DeleteOutlined,
+  CloseOutlined,
   EditOutlined,
   PlayCircleOutlined,
   ImportOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SearchOutlined,
   StopOutlined,
 } from '@ant-design/icons';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
-import type { ServerView } from '@/api/types';
+import type { ServerState, ServerView } from '@/api/types';
 import { useServerActions } from '@/hooks/use-server-actions';
 import { IconButton } from '@/components/IconButton';
 import { Panel } from '@/components/Panel';
+import { PageHeading } from '@/components/PageHeading';
 import { StateBadge } from '@/components/StateBadge';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
@@ -27,6 +30,14 @@ import { ImportServers } from '@/components/ImportServers';
 import { ellipsize, endpointOf, tagPairs } from '@/lib/format';
 import { cx } from '@/lib/cx';
 import styles from './Servers.module.css';
+
+const FILTERS: Array<'all' | ServerState> = [
+  'all',
+  'connected',
+  'connecting',
+  'failed',
+  'disconnected',
+];
 
 /** Matches a server against what was typed. Name, description and
  *  endpoint are all searched, because all three are things someone
@@ -46,6 +57,7 @@ export default function Servers() {
   const { connect, disconnect, remove } = useServerActions();
 
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'all' | ServerState>('all');
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [editing, setEditing] = useState<ServerView | null>(null);
   const [adding, setAdding] = useState(false);
@@ -62,6 +74,7 @@ export default function Servers() {
     const all = servers.data ?? [];
     return all.filter(
       (server) =>
+        (status === 'all' || server.status.state === status) &&
         matches(server, search) &&
         // Every selected tag has to be present: narrowing is what a
         // filter is for, and matching any would widen as tags are added.
@@ -69,12 +82,20 @@ export default function Servers() {
           tagPairs(server.config.tags).some(([key, value]) => `${key}=${value}` === pair),
         ),
     );
-  }, [servers.data, search, activeTags]);
+  }, [servers.data, search, activeTags, status]);
+
+  const filtered = status !== 'all' || search !== '' || activeTags.length > 0;
+  const clearFilters = () => {
+    setStatus('all');
+    setSearch('');
+    setActiveTags([]);
+  };
 
   const columns: ColumnsType<ServerView> = [
     {
       title: t('servers.name'),
       key: 'name',
+      width: 240,
       render: (_, server) => (
         <span className={styles.name}>
           <Link
@@ -123,6 +144,7 @@ export default function Servers() {
           <span className={cx(server.status.toolCount === 0 && styles.countZero)}>
             {server.status.toolCount}
           </span>
+          <span className={styles.countSeparator}>/</span>
           <span className={cx(server.status.resourceCount === 0 && styles.countZero)}>
             {server.status.resourceCount}
           </span>
@@ -143,6 +165,7 @@ export default function Servers() {
                 <button
                   key={pair}
                   type="button"
+                  aria-pressed={activeTags.includes(pair)}
                   className={cx(styles.tag, activeTags.includes(pair) && styles.tagOn)}
                   onClick={() => toggleTag(pair)}
                 >
@@ -157,7 +180,7 @@ export default function Servers() {
     {
       title: t('servers.actions'),
       key: 'actions',
-      width: 150,
+      width: 190,
       align: 'right',
       render: (_, server) => {
         const live = server.status.state === 'connected';
@@ -183,19 +206,24 @@ export default function Servers() {
                 />
               </>
             ) : (
-              <IconButton
-                label={t('servers.connect')}
-                icon={<PlayCircleOutlined />}
+              <Button
+                size="small"
+                icon={<PlayCircleOutlined aria-hidden />}
                 loading={busy}
                 onClick={() => connect.mutate(server.name)}
-              />
+              >
+                {t('servers.connect')}
+              </Button>
             )}
 
-            <IconButton
-              label={t('servers.edit')}
-              icon={<EditOutlined />}
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined aria-hidden />}
               onClick={() => setEditing(server)}
-            />
+            >
+              {t('servers.edit')}
+            </Button>
 
             {/* Deleting stops a running process and drops the
                 configuration, neither of which can be undone from
@@ -232,25 +260,73 @@ export default function Servers() {
 
   return (
     <div className={styles.page}>
+      <PageHeading
+        title={t('servers.title')}
+        description={t('servers.description')}
+        actions={
+          <>
+            {importButton}
+            {addButton}
+          </>
+        }
+      />
       <div className={styles.bar}>
-        <Input.Search
+        <div className={styles.filters} role="group" aria-label={t('servers.filterStatus')}>
+          {FILTERS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={cx(styles.filter, status === value && styles.filterOn)}
+              aria-pressed={status === value}
+              onClick={() => setStatus(value)}
+            >
+              {value === 'all' ? t('servers.all') : t(`state.${value}`)}
+              <span className={styles.filterCount}>
+                {servers.data
+                  ? servers.data.filter(
+                      (server) => value === 'all' || server.status.state === value,
+                    ).length
+                  : '—'}
+              </span>
+            </button>
+          ))}
+        </div>
+        <Input
+          type="search"
+          prefix={<SearchOutlined aria-hidden />}
           allowClear
+          aria-label={t('servers.search')}
           placeholder={t('servers.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className={cx(styles.search)}
         />
-        {activeTags.length > 0 ? (
-          <Button type="text" onClick={() => setActiveTags([])}>
-            {t('common.close')} ({activeTags.length})
-          </Button>
-        ) : null}
-        <span className={styles.spacer} />
-        {importButton}
-        {addButton}
       </div>
 
-      <Panel title={t('nav.servers')} count={shown.length} flush>
+      {filtered ? (
+        <div className={styles.activeFilters}>
+          {activeTags.map((pair) => (
+            <button
+              key={pair}
+              type="button"
+              className={styles.activeTag}
+              onClick={() => toggleTag(pair)}
+              aria-label={t('servers.removeTag', { tag: pair })}
+            >
+              {pair}
+              <CloseOutlined aria-hidden />
+            </button>
+          ))}
+          <span className={styles.filterSummary}>
+            {t('servers.filtered', { shown: shown.length, total: servers.data?.length ?? 0 })}
+          </span>
+          <Button type="text" size="small" onClick={clearFilters}>
+            {t('servers.clearFilters')}
+          </Button>
+        </div>
+      ) : null}
+
+      <Panel title={t('servers.inventory')} count={shown.length} flush>
         {servers.isPending ? (
           <div style={{ padding: 'var(--space-4)' }}>
             <Skeleton active paragraph={{ rows: 5 }} title={false} />
@@ -269,7 +345,10 @@ export default function Servers() {
             }
           />
         ) : shown.length === 0 ? (
-          <Nothing title={t('tools.noMatch')} />
+          <Nothing
+            title={t('servers.noMatch')}
+            action={<Button onClick={clearFilters}>{t('servers.clearFilters')}</Button>}
+          />
         ) : (
           <Table
             dataSource={shown}
@@ -277,6 +356,7 @@ export default function Servers() {
             rowKey="name"
             pagination={false}
             size="middle"
+            scroll={{ x: 980 }}
           />
         )}
       </Panel>

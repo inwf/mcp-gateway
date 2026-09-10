@@ -1,13 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { App, Alert, Button, Form, Input, InputNumber, Segmented, Skeleton, Switch, Tabs } from 'antd';
+import {
+  App,
+  Alert,
+  Button,
+  Form,
+  Input,
+  InputNumber,
+  Segmented,
+  Skeleton,
+  Switch,
+  Tabs,
+} from 'antd';
 import { parse, stringify } from 'yaml';
 import { endpoints } from '@/api/endpoints';
 import { keys } from '@/api/query';
 import { ApiError } from '@/api/client';
 import { LOG_LEVELS, type Config, type FieldError } from '@/api/types';
-import { Panel } from '@/components/Panel';
+import { PageHeading } from '@/components/PageHeading';
 import { ErrorNotice } from '@/components/ErrorNotice';
 import { StringListEditor } from '@/components/KeyValueEditor';
 import { ExportConfig } from '@/components/ExportConfig';
@@ -161,7 +172,31 @@ function FieldErrors({ fields }: { fields: FieldError[] }) {
   );
 }
 
-function SettingsForm({ config, onSave, saving }: {
+function SettingsSection({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={styles.formSection}>
+      <header className={styles.sectionIntro}>
+        <h2>{title}</h2>
+        <p>{hint}</p>
+      </header>
+      <div className={styles.sectionBody}>{children}</div>
+    </section>
+  );
+}
+
+function SettingsForm({
+  config,
+  onSave,
+  saving,
+}: {
   config: Config;
   onSave: (next: Config) => void;
   saving: boolean;
@@ -178,8 +213,8 @@ function SettingsForm({ config, onSave, saving }: {
       requiredMark={false}
       onFinish={(values) => onSave(applyTo(config, values))}
     >
-      <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
-        <Panel title={t('settings.listen')}>
+      <div className={styles.form}>
+        <SettingsSection title={t('settings.listen')} hint={t('settings.listenHint')}>
           <div className={styles.grid}>
             <Form.Item name="host" label={t('settings.host')}>
               <Input className="mono" />
@@ -188,9 +223,9 @@ function SettingsForm({ config, onSave, saving }: {
               <InputNumber min={0} max={65535} className="mono" style={{ width: '100%' }} />
             </Form.Item>
           </div>
-        </Panel>
+        </SettingsSection>
 
-        <Panel title={t('settings.logging')}>
+        <SettingsSection title={t('settings.logging')} hint={t('settings.loggingHint')}>
           <div className={styles.grid}>
             <Form.Item name="level" label={t('settings.level')}>
               <Segmented options={LOG_LEVELS.map((value) => ({ label: value, value }))} block />
@@ -204,7 +239,11 @@ function SettingsForm({ config, onSave, saving }: {
             <Form.Item name="maxSizeMB" label={t('settings.maxSizeMB')}>
               <InputNumber min={1} className="mono" style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item name="mcpWireDebug" label={t('settings.mcpWireDebug')} valuePropName="checked">
+            <Form.Item
+              name="mcpWireDebug"
+              label={t('settings.mcpWireDebug')}
+              valuePropName="checked"
+            >
               <Switch />
             </Form.Item>
             <Form.Item name="apiDebug" label={t('settings.apiDebug')} valuePropName="checked">
@@ -227,9 +266,9 @@ function SettingsForm({ config, onSave, saving }: {
               <Switch />
             </Form.Item>
           </div>
-        </Panel>
+        </SettingsSection>
 
-        <Panel title={t('settings.security')}>
+        <SettingsSection title={t('settings.security')} hint={t('settings.securityHint')}>
           <div className={styles.grid}>
             <Form.Item
               name="allowedNetworks"
@@ -259,9 +298,9 @@ function SettingsForm({ config, onSave, saving }: {
               <Input className="mono" />
             </Form.Item>
           </div>
-        </Panel>
+        </SettingsSection>
 
-        <Panel title={t('settings.gateway')}>
+        <SettingsSection title={t('settings.gateway')} hint={t('settings.gatewayHint')}>
           <div className={styles.grid}>
             <Form.Item name="defaultSessionMode" label={t('settings.defaultSessionMode')}>
               <Segmented options={['stateful', 'stateless']} block />
@@ -303,9 +342,9 @@ function SettingsForm({ config, onSave, saving }: {
               <InputNumber min={0} className="mono" style={{ width: '100%' }} />
             </Form.Item>
           </div>
-        </Panel>
+        </SettingsSection>
 
-        <Panel title={t('settings.startup')}>
+        <SettingsSection title={t('settings.startup')} hint={t('settings.startupHint')}>
           <div className={styles.grid}>
             <Form.Item name="connectDelay" label={t('settings.connectDelay')}>
               <Input className="mono" />
@@ -317,7 +356,7 @@ function SettingsForm({ config, onSave, saving }: {
               <Input className="mono" />
             </Form.Item>
           </div>
-        </Panel>
+        </SettingsSection>
 
         <div className={styles.actions}>
           <Button onClick={() => form.resetFields()}>{t('form.cancel')}</Button>
@@ -339,7 +378,11 @@ function SettingsForm({ config, onSave, saving }: {
  * which reports the offending field by name. That is wired to the
  * button, so an invalid document is refused before it is written.
  */
-function RawEditor({ config, onSave, saving }: {
+function RawEditor({
+  config,
+  onSave,
+  saving,
+}: {
   config: Config;
   onSave: (next: Config) => void;
   saving: boolean;
@@ -379,6 +422,7 @@ function RawEditor({ config, onSave, saving }: {
   return (
     <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
       <textarea
+        aria-label={t('settings.yaml')}
         className={styles.editor}
         value={text}
         spellCheck={false}
@@ -394,7 +438,7 @@ function RawEditor({ config, onSave, saving }: {
       <FieldErrors fields={fields} />
 
       <div className={styles.actions}>
-        {dirty ? <span className={styles.dirty}>●</span> : null}
+        {dirty ? <span className={styles.dirty}>{t('settings.unsaved')}</span> : null}
         <Button onClick={() => setText(original)} disabled={!dirty}>
           {t('form.cancel')}
         </Button>
@@ -417,7 +461,9 @@ export default function Settings() {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const [failure, setFailure] = useState<{ message: string; fields: FieldError[] } | null>(null);
+  const [failure, setFailure] = useState<{ message: string; fields: FieldError[] } | null>(
+    null,
+  );
 
   const config = useQuery({ queryKey: keys.config.current(), queryFn: endpoints.getConfig });
 
@@ -442,13 +488,28 @@ export default function Settings() {
     },
   });
 
-  if (config.isPending) return <Skeleton active paragraph={{ rows: 8 }} />;
+  const heading = (
+    <PageHeading title={t('settings.title')} description={t('settings.description')} />
+  );
+  if (config.isPending)
+    return (
+      <div className={styles.page}>
+        {heading}
+        <Skeleton active paragraph={{ rows: 8 }} />
+      </div>
+    );
   if (config.isError) {
-    return <ErrorNotice error={config.error} onRetry={() => void config.refetch()} />;
+    return (
+      <div className={styles.page}>
+        {heading}
+        <ErrorNotice error={config.error} onRetry={() => void config.refetch()} />
+      </div>
+    );
   }
 
   return (
     <div className={styles.page}>
+      {heading}
       <div className={styles.path}>
         <span className="label">{t('settings.path')}</span>
         <span className={styles.pathValue}>{config.data.path}</span>

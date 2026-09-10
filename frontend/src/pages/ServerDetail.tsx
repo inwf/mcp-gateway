@@ -202,7 +202,12 @@ function ToolsTab({ server }: { server: ServerView }) {
               loading={expose.isPending && expose.variables?.tool === tool.name}
               disabled={expose.isPending}
               onChange={(on) =>
-                expose.mutate({ server: server.name, config: server.config, tool: tool.name, on })
+                expose.mutate({
+                  server: server.name,
+                  config: server.config,
+                  tool: tool.name,
+                  on,
+                })
               }
               aria-label={`${t('server.expose')} ${tool.name}`}
             />
@@ -331,7 +336,7 @@ export default function ServerDetail() {
         <Link to="/servers" className={styles.back} aria-label={t('error.back')}>
           <ArrowLeftOutlined />
         </Link>
-        <h2 className={styles.name}>{view.name}</h2>
+        <h1 className={styles.name}>{view.name}</h1>
         <StateBadge
           state={view.status.state}
           error={view.status.error}

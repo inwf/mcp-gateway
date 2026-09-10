@@ -1,56 +1,22 @@
-/*
- * The design tokens, and the only place a colour is written down.
- *
- * These are consumed twice: by the stylesheets in this project, and by
- * antd's ConfigProvider (see src/theme/antd.ts, which reads the same
- * values). One palette with two readers rather than two palettes that
- * have to be kept in agreement — the failure mode of the latter is a
- * panel whose border is a shade off from the table inside it, which is
- * both easy to introduce and hard to notice.
- *
- * Two palettes now, one per theme. The switch is an attribute on the
- * root element rather than a prefers-color-scheme query, because the
- * choice is the user's and only one of its three values is the system's.
- * Resolving "follow the system" to light or dark happens once in
- * JavaScript (see src/stores/theme.ts); every stylesheet below only ever
- * sees a resolved answer.
- *
- * Every name here exists in both palettes. A token defined in only one
- * would leave whatever uses it inheriting the other theme's value —
- * legible in the theme it was written for and invisible in the other,
- * which is the kind of fault nobody notices until they switch.
- */
-
-/* ===== what does not depend on the theme ===== */
-
+/* Keep the antd palette in theme/antd.ts in step with these colours. */
 :root {
-  /* ===== type =====
-     Two families with a clear division of labour: prose in the system
-     UI face, and every identifier, count and timestamp in monospace.
-     Machine-readable values are what this application is mostly made
-     of, and setting them in mono is most of what makes it read as an
-     instrument rather than a form. */
   --font-ui:
-    system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --font-mono:
-    ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas,
-    monospace;
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 
-  --text-xs: 0.6875rem;
+  --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.875rem;
   --text-lg: 1rem;
   --text-xl: 1.375rem;
-  --text-2xl: 1.875rem;
-  --text-display: 2.75rem;
+  --text-2xl: 1.75rem;
 
-  /* ===== metrics ===== */
   --radius-sm: 4px;
-  --radius: 8px;
-  --radius-lg: 14px;
-  --rail-width: 60px;
-  --topbar-height: 52px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --sidebar-width: 216px;
+  --topbar-height: 56px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -60,216 +26,102 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  /* ===== motion =====
-     One pair of durations and one easing, so that everything that
-     moves looks like it belongs to the same machine. */
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --fast: 140ms;
-  --slow: 320ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --fast: 120ms;
+  --slow: 200ms;
 }
 
-/* ===== dark =====
- *
- * Also the bare :root, so that the document has a complete palette
- * before any script has run. Otherwise the first paint would happen with
- * no colours at all.
- */
-
+/* Opaque surfaces keep long lists legible in either theme. */
 :root,
-:root[data-theme='dark'] {
-  color-scheme: dark;
-
-  /* ===== surfaces =====
-     A stack rather than a single background: depth here comes from
-     four steps of near-black with a cool cast, since drop shadows are
-     close to invisible on a dark ground. */
-  --void: #06080d;
-  --surface: #0b0f16;
-  --raised: #111823;
-  --overlay: #18202c;
-  --sunken: #05070b;
-
-  /* ===== lines =====
-     Hairlines, low contrast at rest. Structure is drawn with these
-     rather than with shadow. */
-  --line: rgb(255 255 255 / 7%);
-  --line-strong: rgb(255 255 255 / 13%);
-  --line-accent: rgb(45 212 191 / 45%);
-
-  /* ===== text ===== */
-  --ink: #e8edf5;
-  --ink-muted: #93a1b5;
-  --ink-faint: #5d6b80;
-  --ink-inverse: #06080d;
-
-  /* ===== accent =====
-     Teal, deliberately not the blue that reads as a default admin
-     panel. The glow is what carries emphasis on a dark ground. */
-  --accent: #2dd4bf;
-  --accent-strong: #14b8a6;
-  --accent-dim: rgb(45 212 191 / 12%);
-  --accent-glow: rgb(45 212 191 / 32%);
-
-  /* ===== state ===== */
-  --ok: #4ade80;
-  --ok-dim: rgb(74 222 128 / 12%);
-  --warn: #fbbf24;
-  --warn-dim: rgb(251 191 36 / 12%);
-  --danger: #fb7185;
-  --danger-dim: rgb(251 113 133 / 12%);
-  --info: #a78bfa;
-  --info-dim: rgb(167 139 250 / 12%);
-
-  /* ===== the field =====
-     The washes and grid of the moving ground. They are tokens because
-     their opacities cannot be shared: a 13% wash that reads as a glow on
-     near-black is invisible on paper, and a white grid line on a white
-     ground is not there at all. */
-  --field-wash-1: rgb(45 212 191 / 13%);
-  --field-wash-2: rgb(167 139 250 / 11%);
-  --field-wash-3: rgb(20 184 166 / 9%);
-  --field-grid: rgb(255 255 255 / 2.5%);
-
-  /* ===== incidental tints =====
-     The very low-alpha grounds used for chips, hovers and the scrollbar.
-     They are tokens for the same reason the field's washes are: white at
-     3% lifts a chip off near-black and does nothing at all on paper. */
-  --lift: rgb(255 255 255 / 3%);
-  --lift-strong: rgb(255 255 255 / 5%);
-  --accent-faint: rgb(45 212 191 / 4.5%);
-  --scroll-thumb: rgb(255 255 255 / 11%);
-  --scroll-thumb-hover: rgb(255 255 255 / 20%);
-
-  /* ===== translucent surfaces =====
-     The panels, cards and chrome are translucent so the moving field
-     shows through them. Each is a pair of stops rather than one colour,
-     and the pair is a token because it inverts: in the dark theme a
-     panel is a dark film over the field, in the light theme a white one.
-     Only the gradient's angle stays with the component, since that is a
-     layout decision rather than a colour.
-
-     Nothing outside this file writes a colour. The stylesheet test
-     enforces it — a hardcoded surface is legible in the theme it was
-     written for and unreadable in the other, which is how the light
-     theme first shipped with dark panels. */
-  --panel-a: rgb(17 24 35 / 62%);
-  --panel-b: rgb(11 15 22 / 52%);
-  --card-a: rgb(17 24 35 / 78%);
-  --card-b: rgb(11 15 22 / 62%);
-  --chrome-a: rgb(11 15 22 / 72%);
-  --chrome-b: rgb(6 8 13 / 88%);
-  --chrome-flat: rgb(6 8 13 / 55%);
-
-  /* ===== state, as an outline =====
-     The state colours at the alpha a border wants. Deriving these from
-     --ok and friends would need color-mix; naming them keeps the file to
-     one CSS feature set. */
-  --ok-line: rgb(74 222 128 / 28%);
-  --warn-line: rgb(251 191 36 / 28%);
-  --danger-line: rgb(251 113 133 / 28%);
-  --danger-faint: rgb(251 113 133 / 5%);
-
-  /* The second stop of the brand mark. Fixed in both themes: it is a
-     mark, not a surface. */
-  --mark-b: #6366f1;
-}
-
-/* ===== light =====
- *
- * Not a lightened copy: the dark theme builds depth upward out of
- * near-black, and inverting that gives four indistinguishable whites. So
- * the stack runs the other way — the floor is the darkest surface and
- * panels sit above it in lighter steps — and structure comes from lines
- * with real contrast rather than from steps between surfaces.
- *
- * The accent stays teal. It is the one thing that makes this recognisably
- * the same application in either theme, and it is also what keeps the
- * light theme from arriving at the blue-on-white that every admin panel
- * arrives at.
- */
-
 :root[data-theme='light'] {
   color-scheme: light;
-
-  /* A warm-grey floor rather than white. Full white leaves panels
-     nowhere to go but grey, which reads as disabled. */
-  --void: #eef1f5;
-  --surface: #f7f9fb;
-  --raised: #ffffff;
+  --void: #faf9f6;
+  --surface: #ffffff;
+  --raised: #f5f4f0;
   --overlay: #ffffff;
-  --sunken: #e7ebf1;
+  --sunken: #f6f5f2;
+  --sidebar: #f2f1ed;
 
-  /* Darker than the dark theme's hairlines are pale, and by more than
-     mirroring the opacity would give: on a light ground the eye needs
-     real contrast to read a line as structure. */
-  --line: rgb(15 30 55 / 11%);
-  --line-strong: rgb(15 30 55 / 20%);
-  --line-accent: rgb(13 148 136 / 55%);
+  --line: #e6e4df;
+  --line-strong: #d2cfc7;
+  --line-accent: #b36647;
 
-  --ink: #16202e;
-  --ink-muted: #55647a;
-  --ink-faint: #78879e;
+  --ink: #282824;
+  --ink-muted: #686860;
+  --ink-faint: #6d6c63;
   --ink-inverse: #ffffff;
 
-  /* A deeper teal. The dark theme's #2dd4bf is chosen to glow against
-     near-black and fails contrast against white. */
-  --accent: #0d9488;
-  --accent-strong: #0f766e;
-  --accent-dim: rgb(13 148 136 / 10%);
-  --accent-glow: rgb(13 148 136 / 22%);
+  --accent: #a4492d;
+  --accent-strong: #84371f;
+  --accent-dim: #f4e8e2;
+  --accent-faint: #fbf2ed;
+  --selection: #ead3c8;
 
-  /* Likewise deepened: the dark theme's state colours are all chosen to
-     be readable on black. */
-  --ok: #15803d;
-  --ok-dim: rgb(21 128 61 / 10%);
-  --warn: #b45309;
-  --warn-dim: rgb(180 83 9 / 10%);
-  --danger: #be123c;
-  --danger-dim: rgb(190 18 60 / 9%);
-  --info: #6d28d9;
-  --info-dim: rgb(109 40 217 / 9%);
+  --ok: #38734d;
+  --ok-dim: #edf4ee;
+  --ok-line: #cfdfd3;
+  --warn: #916019;
+  --warn-dim: #faf1dd;
+  --warn-line: #e9dbb7;
+  --danger: #b44040;
+  --danger-dim: #fbeeee;
+  --danger-line: #edcccc;
+  --danger-faint: #fdf6f5;
+  --info: #526d87;
+  --info-dim: #eef1f5;
 
-  /* Stronger washes and a darker grid — the same opacities that read as
-     a glow on near-black are not visible here at all. */
-  --field-wash-1: rgb(13 148 136 / 15%);
-  --field-wash-2: rgb(109 40 217 / 11%);
-  --field-wash-3: rgb(15 118 110 / 12%);
-  --field-grid: rgb(15 30 55 / 5%);
-
-  /* The direction reverses: on a light ground a lift is a shade darker,
-     not lighter. */
-  --lift: rgb(15 30 55 / 4%);
-  --lift-strong: rgb(15 30 55 / 7%);
-  --accent-faint: rgb(13 148 136 / 6%);
-  --scroll-thumb: rgb(15 30 55 / 18%);
-  --scroll-thumb-hover: rgb(15 30 55 / 32%);
-
-  /* White films rather than dark ones, and more opaque: a 62% dark film
-     over the field still reads as a panel, whereas a 62% white one lets
-     enough of the field through to make text on it hard to read. */
-  --panel-a: rgb(255 255 255 / 88%);
-  --panel-b: rgb(250 252 254 / 80%);
-  --card-a: rgb(255 255 255 / 96%);
-  --card-b: rgb(248 250 253 / 88%);
-  --chrome-a: rgb(255 255 255 / 92%);
-  --chrome-b: rgb(246 248 251 / 96%);
-  --chrome-flat: rgb(255 255 255 / 86%);
-
-  /* Deepened along with the state colours themselves. */
-  --ok-line: rgb(21 128 61 / 32%);
-  --warn-line: rgb(180 83 9 / 32%);
-  --danger-line: rgb(190 18 60 / 30%);
-  --danger-faint: rgb(190 18 60 / 5%);
-
-  --mark-b: #6366f1;
+  --lift: #f7f6f3;
+  --lift-strong: #efede7;
+  --scroll-thumb: #c8c5bc;
+  --scroll-thumb-hover: #aca99e;
 }
 
-/* Someone who has asked their system not to animate things means it.
-   Transitions are kept, since a colour fade conveys no motion, but
-   anything that travels is switched off. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --void: #1d1e1c;
+  --surface: #232421;
+  --raised: #292a26;
+  --overlay: #2c2d29;
+  --sunken: #1a1b19;
+  --sidebar: #191a18;
+
+  --line: #373832;
+  --line-strong: #4b4d44;
+  --line-accent: #a6755e;
+
+  --ink: #e9e9e1;
+  --ink-muted: #acaea2;
+  --ink-faint: #929589;
+  --ink-inverse: #1c1d19;
+
+  --accent: #df9b7f;
+  --accent-strong: #edb69d;
+  --accent-dim: #3c2e27;
+  --accent-faint: #2d2823;
+  --selection: #64483b;
+
+  --ok: #9ac6a0;
+  --ok-dim: #29382c;
+  --ok-line: #3a5040;
+  --warn: #d9b873;
+  --warn-dim: #3a3324;
+  --warn-line: #554931;
+  --danger: #e8958f;
+  --danger-dim: #3d2b28;
+  --danger-line: #63413b;
+  --danger-faint: #302522;
+  --info: #a4b9cd;
+  --info-dim: #2c343c;
+
+  --lift: #292a26;
+  --lift-strong: #32342e;
+  --scroll-thumb: #505249;
+  --scroll-thumb-hover: #686b5f;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --fast: 1ms;
-    --slow: 1ms;
+    --fast: 0ms;
+    --slow: 0ms;
   }
 }

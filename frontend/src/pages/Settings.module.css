@@ -1,97 +1,125 @@
 .page {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
   align-content: start;
-  max-width: 980px;
+  max-width: 1120px;
 }
-
 .path {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: baseline;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--ink-faint);
+  align-items: center;
+  gap: var(--space-3);
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
-
 .pathValue {
   color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
-
-.grid {
+.pathSpacer {
+  flex: 1;
+}
+.form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0 var(--space-4);
 }
 
+.formSection {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-7);
+  padding: 28px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.formSection:first-child {
+  padding-top: 4px;
+}
+.formSection:last-of-type {
+  border-bottom: 0;
+}
+.sectionIntro h2 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.sectionIntro p {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  line-height: 1.8;
+}
+.sectionBody {
+  min-width: 0;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-5);
+}
 .wide {
   grid-column: 1 / -1;
 }
-
-/* An explanation that covers the fields under it, rather than a hint
-   belonging to one input. antd's own `extra` text sits inside one
-   Form.Item, which is the wrong scope for a rule about two of them and
-   the field above. */
 .note {
-  margin: 0 0 var(--space-3);
-  max-width: 68ch;
+  margin: 0 0 var(--space-4);
   color: var(--ink-faint);
-  font-size: var(--text-sm);
-  line-height: 1.6;
+  font-size: var(--text-xs);
+  line-height: 1.8;
 }
 
 .actions {
+  position: sticky;
+  bottom: -32px;
+  z-index: 1;
   display: flex;
-  gap: var(--space-3);
   align-items: center;
   justify-content: flex-end;
+  gap: var(--space-3);
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  background: var(--void);
 }
 
 .dirty {
   margin-right: auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
   color: var(--warn);
+  font-size: var(--text-xs);
 }
-
-/* ===== the raw editor ===== */
-
 .editor {
   display: block;
   width: 100%;
-  min-height: 440px;
-  padding: var(--space-3);
+  min-height: 480px;
+  padding: var(--space-5);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: var(--sunken);
+  background: var(--surface);
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  line-height: 1.65;
+  line-height: 1.8;
   resize: vertical;
   tab-size: 2;
   white-space: pre;
   overflow-wrap: normal;
   overflow-x: auto;
 }
-
 .editor:focus {
   border-color: var(--accent);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-dim);
+  outline: 2px solid var(--accent-dim);
+  outline-offset: 1px;
 }
-
 .problem {
   display: block;
   margin-top: var(--space-2);
+  color: var(--danger);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--danger);
   overflow-wrap: anywhere;
 }
-
 .fieldErrors {
   display: grid;
   gap: 4px;
@@ -99,25 +127,43 @@
   padding: 0;
   list-style: none;
 }
-
 .fieldError {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-
 .fieldName {
   color: var(--danger);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
-
 .fieldMessage {
   color: var(--ink-muted);
 }
 
-/* Pushes the export control to the end of the path row, so the path
-   itself stays where the eye expects it. */
-.pathSpacer {
-  flex: 1;
+@media (max-width: 1100px) {
+  .formSection {
+    grid-template-columns: 160px minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+  .actions {
+    bottom: -24px;
+  }
+}
+
+@media (max-width: 760px) {
+  .formSection {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+  .actions {
+    bottom: -22px;
+  }
+}
+
+@media (max-width: 480px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
