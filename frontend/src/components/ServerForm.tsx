@@ -21,7 +21,7 @@ import { ExposedToolsEditor } from '@/components/ExposedToolsEditor';
  *
  * Switching transport keeps whatever was typed. Someone converting a
  * local server to a remote one should not have to retype its name,
- * description, tags and timeout; and the fields that no longer apply
+ * description and timeout; and the fields that no longer apply
  * are dropped on submission rather than on switch, so switching back
  * restores them.
  */
@@ -41,7 +41,6 @@ export interface ServerFormValues {
   headers: Record<string, string>;
   proxy: string;
   exposedTools: string[];
-  tags: Record<string, string>;
 }
 
 function emptyValues(): ServerFormValues {
@@ -58,7 +57,6 @@ function emptyValues(): ServerFormValues {
     headers: {},
     proxy: '',
     exposedTools: [],
-    tags: {},
   };
 }
 
@@ -76,7 +74,6 @@ function valuesFrom(name: string, server: MCPServer): ServerFormValues {
     headers: server.headers ?? {},
     proxy: server.proxy ?? '',
     exposedTools: server.exposedTools ?? [],
-    tags: server.tags ?? {},
   };
 }
 
@@ -92,7 +89,6 @@ function serverFrom(values: ServerFormValues): MCPServer {
   };
 
   if (values.description.trim()) server.description = values.description.trim();
-  if (Object.keys(values.tags).length) server.tags = values.tags;
   if (values.exposedTools.length) server.exposedTools = values.exposedTools;
 
   if (spawns) {
@@ -117,6 +113,8 @@ function jsonMessage(t: (key: string) => string, reason: string): string {
       return t('form.jsonNotAnObject');
     case 'jsonOneServer':
       return t('form.jsonOneServer');
+    case 'jsonServerTagsRemoved':
+      return t('form.jsonServerTagsRemoved');
     default:
       return `${t('call.invalidJson')} — ${reason}`;
   }
@@ -137,7 +135,6 @@ const FIELD_NAMES = [
   'headers',
   'proxy',
   'exposedTools',
-  'tags',
 ] as const satisfies ReadonlyArray<keyof ServerFormValues>;
 
 type FieldName = (typeof FIELD_NAMES)[number];
@@ -427,10 +424,6 @@ function FormBody({
           extra={t('form.descriptionHint')}
         >
           <Input.TextArea rows={2} />
-        </Form.Item>
-
-        <Form.Item name="tags" label={t('form.tags')}>
-          <KeyValueEditor keyPlaceholder="env" valuePlaceholder="prod" />
         </Form.Item>
 
         {/* Picking from what the server actually offers, rather than

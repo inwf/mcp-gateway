@@ -221,11 +221,6 @@ type MCPServer struct {
 	// that lists servers, to help a model pick the right one.
 	Description string `yaml:"description,omitempty"`
 
-	// Tags are free-form key/value metadata used for grouping and
-	// filtering in the UI and in tool search. They carry no routing
-	// meaning.
-	Tags map[string]string `yaml:"tags,omitempty"`
-
 	// Timeout bounds a single request to this server.
 	Timeout time.Duration `yaml:"timeout"`
 

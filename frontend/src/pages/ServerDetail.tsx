@@ -27,7 +27,7 @@ import { Nothing } from '@/components/Nothing';
 import { LogView } from '@/components/LogView';
 import { ServerForm } from '@/components/ServerForm';
 import { ToolCallDialog } from '@/components/ToolCallDialog';
-import { endpointOf, fullTime, relative, tagPairs } from '@/lib/format';
+import { endpointOf, fullTime, relative } from '@/lib/format';
 import { cx } from '@/lib/cx';
 import { stagger } from '@/lib/motion';
 import motion from '@/styles/motion.module.css';
@@ -132,17 +132,6 @@ function OverviewTab({ server }: { server: ServerView }) {
         </div>
       </Panel>
 
-      {tagPairs(config.tags).length > 0 ? (
-        <Panel title={t('form.tags')}>
-          <div className={styles.caps}>
-            {tagPairs(config.tags).map(([key, value]) => (
-              <span key={key} className={styles.cap}>
-                {key}={value}
-              </span>
-            ))}
-          </div>
-        </Panel>
-      ) : null}
     </div>
   );
 }

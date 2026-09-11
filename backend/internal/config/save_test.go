@@ -35,7 +35,6 @@ func populated() config.Config {
 			Transport:   config.TransportStdio,
 			Enabled:     true,
 			Description: "local filesystem access",
-			Tags:        map[string]string{"env": "prod", "kind": "fs"},
 			Timeout:     90 * time.Second,
 			Command:     "npx",
 			Args:        []string{"-y", "server-filesystem", "/tmp"},

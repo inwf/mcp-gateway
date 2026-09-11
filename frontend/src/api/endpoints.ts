@@ -115,21 +115,20 @@ export const endpoints = {
   /** `all` asks for every upstream tool rather than only the exposed
    *  ones. The management interface wants that: it is where exposure is
    *  decided, and it cannot offer a choice about tools it does not show. */
-  tools: (options: { search?: string; tags?: string[]; limit?: number; all?: boolean } = {}) => {
+  tools: (options: { search?: string; limit?: number; all?: boolean } = {}) => {
     const query: Record<string, string | number> = {};
     if (options.search) query['q'] = options.search;
     if (options.limit) query['limit'] = options.limit;
     if (options.all) query['all'] = 'true';
-    const path = buildTagQuery(`${BASE}/tools`, options.tags);
     return api
-      .get<{ tools: AggregatedTool[]; total: number }>(path, { query })
+      .get<{ tools: AggregatedTool[]; total: number }>(`${BASE}/tools`, { query })
       .then((r) => r.tools);
   },
 
-  resources: (options: { tags?: string[] } = {}) =>
+  resources: () =>
     api
       .get<{ resources: AggregatedResource[]; total: number }>(
-        buildTagQuery(`${BASE}/resources`, options.tags),
+        `${BASE}/resources`,
       )
       .then((r) => r.resources),
 
@@ -160,12 +159,3 @@ export const endpoints = {
   clearLogs: (server?: string) =>
     api.delete<void>(`${BASE}/logs`, { query: server ? { server } : {} }),
 };
-
-/** Tag filters repeat the same parameter, which URLSearchParams handles
- *  but the query helper's object form cannot express. */
-function buildTagQuery(path: string, tags: string[] | undefined): string {
-  if (!tags?.length) return path;
-  const params = new URLSearchParams();
-  for (const tag of tags) params.append('tag', tag);
-  return `${path}?${params.toString()}`;
-}

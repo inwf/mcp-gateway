@@ -6,7 +6,6 @@ import { Button, Input, Popconfirm, Skeleton, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   DeleteOutlined,
-  CloseOutlined,
   EditOutlined,
   PlayCircleOutlined,
   ImportOutlined,
@@ -27,7 +26,7 @@ import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
 import { ServerForm } from '@/components/ServerForm';
 import { ImportServers } from '@/components/ImportServers';
-import { ellipsize, endpointOf, tagPairs } from '@/lib/format';
+import { ellipsize, endpointOf } from '@/lib/format';
 import { cx } from '@/lib/cx';
 import { stagger } from '@/lib/motion';
 import motion from '@/styles/motion.module.css';
@@ -60,37 +59,25 @@ export default function Servers() {
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<'all' | ServerState>('all');
-  const [activeTags, setActiveTags] = useState<string[]>([]);
   const [editing, setEditing] = useState<ServerView | null>(null);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
 
   const servers = useQuery({ queryKey: keys.servers.list(), queryFn: endpoints.listServers });
 
-  const toggleTag = (pair: string) =>
-    setActiveTags((current) =>
-      current.includes(pair) ? current.filter((p) => p !== pair) : [...current, pair],
-    );
-
   const shown = useMemo(() => {
     const all = servers.data ?? [];
     return all.filter(
       (server) =>
         (status === 'all' || server.status.state === status) &&
-        matches(server, search) &&
-        // Every selected tag has to be present: narrowing is what a
-        // filter is for, and matching any would widen as tags are added.
-        activeTags.every((pair) =>
-          tagPairs(server.config.tags).some(([key, value]) => `${key}=${value}` === pair),
-        ),
+        matches(server, search),
     );
-  }, [servers.data, search, activeTags, status]);
+  }, [servers.data, search, status]);
 
-  const filtered = status !== 'all' || search !== '' || activeTags.length > 0;
+  const filtered = status !== 'all' || search !== '';
   const clearFilters = () => {
     setStatus('all');
     setSearch('');
-    setActiveTags([]);
   };
 
   const columns: ColumnsType<ServerView> = [
@@ -152,32 +139,6 @@ export default function Servers() {
           </span>
         </span>
       ),
-    },
-    {
-      title: t('servers.tags'),
-      key: 'tags',
-      render: (_, server) => {
-        const pairs = tagPairs(server.config.tags);
-        if (pairs.length === 0) return <span className={styles.endpoint}>—</span>;
-        return (
-          <span className={styles.tags}>
-            {pairs.map(([key, value]) => {
-              const pair = `${key}=${value}`;
-              return (
-                <button
-                  key={pair}
-                  type="button"
-                  aria-pressed={activeTags.includes(pair)}
-                  className={cx(styles.tag, activeTags.includes(pair) && styles.tagOn)}
-                  onClick={() => toggleTag(pair)}
-                >
-                  {key}={value}
-                </button>
-              );
-            })}
-          </span>
-        );
-      },
     },
     {
       title: t('servers.actions'),
@@ -307,18 +268,6 @@ export default function Servers() {
 
       {filtered ? (
         <div className={styles.activeFilters}>
-          {activeTags.map((pair) => (
-            <button
-              key={pair}
-              type="button"
-              className={cx(styles.activeTag, motion.enter)}
-              onClick={() => toggleTag(pair)}
-              aria-label={t('servers.removeTag', { tag: pair })}
-            >
-              {pair}
-              <CloseOutlined aria-hidden />
-            </button>
-          ))}
           <span className={styles.filterSummary}>
             {t('servers.filtered', { shown: shown.length, total: servers.data?.length ?? 0 })}
           </span>
@@ -360,7 +309,7 @@ export default function Servers() {
             onRow={(_, index) => ({ style: stagger(index ?? 0) })}
             pagination={false}
             size="middle"
-            scroll={{ x: 980 }}
+            scroll={{ x: 860 }}
           />
         )}
       </Panel>

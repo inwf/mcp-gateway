@@ -410,7 +410,7 @@ func nothingToShow(server, search string) string {
 // Real servers write long descriptions — the official filesystem server's
 // run past 300 characters — and an untruncated column wraps across
 // several terminal lines each, which destroys the list as a list. The
-// first sentence is what a list is for; `get_tool` is where the full text
+// first sentence is what a list is for; `get_tool_details` is where the full text
 // lives.
 const descriptionWidth = 96
 

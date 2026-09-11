@@ -37,7 +37,7 @@ func TestStatusReportsTheRunningInstance(t *testing.T) {
 	if got := fieldValue(t, stdout, "servers"); got != "1 configured, 1 connected, 0 failed" {
 		t.Errorf("servers = %q, want the one connected server", got)
 	}
-	// The seven gateway tools are always on offer, so the count is never
+	// The four gateway tools are always on offer, so the count is never
 	// zero on a running instance.
 	if got := fieldValue(t, stdout, "tools"); !strings.Contains(got, "offered to clients") {
 		t.Errorf("tools = %q, want what is on offer", got)

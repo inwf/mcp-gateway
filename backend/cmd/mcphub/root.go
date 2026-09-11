@@ -141,7 +141,6 @@ func newRootCommand(stdout, stderr io.Writer, web fs.FS) *cobra.Command {
 		newGuideCommand(stdout),
 		newServersCommand(&global, stdout),
 		newStatusCommand(&global, stdout),
-		newTagsCommand(&global, stdout),
 		newToolsCommand(&global, stdout),
 		newUICommand(&global, stdout, openInBrowser()),
 		newVersionCommand(stdout),

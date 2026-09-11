@@ -69,18 +69,6 @@
   color: var(--ink-faint);
   font-size: var(--text-xs);
 }
-.activeTag {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
-  border: 1px solid var(--line-accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent-dim);
-  color: var(--accent);
-  font-size: 11px;
-  cursor: pointer;
-}
 
 .name {
   display: flex;
@@ -127,44 +115,6 @@
 .countZero,
 .countSeparator {
   color: var(--ink-faint);
-}
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.tag {
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--raised);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--ink-muted);
-  cursor: pointer;
-}
-
-.tag:hover {
-  border-color: var(--line-accent);
-  color: var(--accent);
-}
-.tagOn {
-  border-color: var(--line-accent);
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-
-.tag,
-.activeTag {
-  transition:
-    background-color var(--fast) var(--ease),
-    border-color var(--fast) var(--ease),
-    color var(--fast) var(--ease);
-}
-
-.activeTag:hover {
-  background: var(--accent-faint);
 }
 .actions {
   display: flex;

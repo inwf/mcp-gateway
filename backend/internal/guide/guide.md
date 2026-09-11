@@ -73,13 +73,13 @@ claude mcp add --transport http mcphub http://127.0.0.1:7788/mcp
 上游服务器的工具会以 `服务器名_工具名` 的形式暴露出来（例如 `files_read`），
 所以两台服务器各有一个 `read` 也不会撞名。
 
-**但默认一个上游工具都不暴露。** 客户端一开始只看到网关自己的七个系统工具，
+**但默认一个上游工具都不暴露。** 客户端一开始只看到网关自己的四个系统工具，
 上游工具要在配置里逐个点名（`mcpServers.<名字>.exposedTools`，Web 界面的工具页
 每个工具有一个开关）才会进入 `tools/list`。
 
 这是有意的：上游的 schema 很占地方，一台服务器十几个工具、每个十几个参数，
 全塞进每个客户端的上下文就是纯浪费。**没暴露不等于用不了**——模型可以用
-`search_tools` 找、`get_tool` 取 schema、`call_tool` 调，需要时才付这份 token。
+`search_tools` 找、`get_tool_details` 取 schema、`call_tool` 调，需要时才付这份 token。
 把常用的几个暴露出来、其余留给按需检索，是这个网关想要的用法。
 
 想看有哪些还没暴露：
@@ -119,7 +119,6 @@ mcphub servers add remote --url https://example.com/mcp \
 | --------------- | ---------------------------------------- |
 | `--env K=V`     | 子进程的环境变量，可重复                  |
 | `--header K=V`  | HTTP 请求头，可重复                       |
-| `--tag K=V`     | 分组与筛选用的标签，可重复                |
 | `--proxy URL`   | 走 HTTP 代理连接                          |
 | `--timeout 30s` | 单次请求超时                              |
 | `--disabled`    | 只写进配置，先不连                        |
@@ -135,52 +134,73 @@ mcphub servers list
 
 ## 网关自带的系统工具
 
-除了转发上游的工具，mcphub 自己还提供七个工具。它们的用途是：**上游工具很多
-时，让模型先找再调，而不是把几百个工具的完整 schema 一次性塞进上下文。**
+mcphub 提供四个系统工具，按需发现上游能力。默认的 `tools/list` 只包含这四个，
+配置 `exposedTools` 后还会包含被选中的上游工具。
 
-| 工具                         | 用途                                       |
-| ---------------------------- | ------------------------------------------ |
-| `list_servers`               | 有哪些服务器，各自是什么状态                |
-| `list_tools`                 | 某台服务器提供哪些工具（名字 + 一行描述）    |
-| `search_tools`               | 按关键词跨全部服务器搜工具                  |
-| `get_tool`                   | 取某个工具的完整输入 schema 与 annotations   |
-| `call_tool`                  | 按服务器名 + 工具名调用                     |
-| `list_tags`                  | 列出标签，用于按用途筛选服务器              |
-| `update_server_description`  | 改写某台服务器的描述                        |
+| 工具 | 用途 |
+| --- | --- |
+| `list_servers` | 查看配置的服务器、描述、连接状态及工具和资源数量 |
+| `search_tools` | 按关键词搜索，或指定服务器分页浏览；可同时取得完整输入 schema |
+| `get_tool_details` | 查看一个已知工具的完整输入 schema、title 与 annotations |
+| `call_tool` | 按 `server` + `tool` 调用上游，`args` 放业务参数 |
 
-典型用法是三步：`search_tools` 找到候选 → `get_tool` 取 schema →
-`call_tool` 调用。已经暴露出来的工具可以直接按 `files_read` 这样的名字调，
-不必绕 `call_tool`；没暴露的就走这三步，`call_tool` 对两者都管用。
+已知目标时直接搜索；已知服务器、工具和参数时直接调用，无需重复发现：
 
-**一个工具没出现在 `tools/list` 里，不代表它调不了。** 默认一个上游工具都不
-暴露，这是有意的（见上文的 `exposedTools`）；未暴露的工具照样能被
-`list_tools` / `search_tools` 发现，也照样能用 `call_tool` 调。
-
-`search_tools` 的多个词是**放宽**而不是收紧：命中词多的排在前面，某个词在所有
-工具里都没出现时会单独报在 `unmatched` 里，而不是把结果清空。所以拿同一件事的
-几种说法一起查是可以的。
-
-**问网关它自己**：`list_tools` 与 `get_tool` 都接受服务器名 `mcphub`，
-返回的就是这七个工具本身——
-
-```
-list_tools(server="mcphub")              这七个工具都有哪些
-get_tool(server="mcphub", tool="call_tool")   call_tool 自己要什么参数
+```text
+search_tools(query="读取文件", includeSchema=true, limit=2)
+call_tool(server="files", tool="read", args={"path":"/tmp/example.txt"})
 ```
 
-其它系统工具不需要服务器名，直接调即可；`update_server_description` 对
-`mcphub` 会明确拒绝，因为网关自己不是被代理的服务器。
+如果搜索时没有取 schema，可以再用 `get_tool_details(server="files", tool="read")`
+补取。已暴露的工具也能直接按 `files_read` 这样的名字调用。
+**未暴露的工具照样能被搜索、查看详情和调用。**
 
-除了工具，还有两份资源值得先读：`hub://guide` 是本文，
-`hub://servers/{名字}` 是某台服务器的状态加它全部工具的「名字 → 描述」——
-一次读取就能看完一台服务器，不必逐个 `get_tool`。
+`search_tools` 的参数：
 
-这七个工具在 CLI 和 Web 界面里都单独成组，也可以直接调用：
+- `query`、`server` 至少提供一个非空值。只填 `server` 就是浏览该服务器。
+- `query` 匹配工具名、工具描述、服务器名、握手名称和服务器描述，不区分大小写。
+  多词匹配其中任意一个就能入选，命中词多的排前面，未命中的词列在 `unmatched`。
+- `limit` 默认 **5**，范围 **1–20**。显式传 0、负数或大于 20 会报错。
+- `includeSchema` 默认 `false`；设为 `true` 时返回所选结果的完整 schema 和
+  annotations，默认数量仍为 5。准备调用通常取 1–3 个候选即可，schema 不截断。
+- 返回 `nextCursor` 表示还有下一页。保持 `query` 和 `server`，把它作为 `cursor`
+  传回；可以改变 `limit` 和 `includeSchema`。
 
+翻页检查本次查询的结果集合及顺序。无关服务器的变化不会让游标失效；若匹配结果
+增减或重新排序，会要求从第一页重查。只改 schema 而顺序不变时，下一页读到最新详情。
+
+搜索结果和工具详情都用 `server` + `tool` 标识工具；`exposed` 是可直接调用的
+对外名，未暴露时为空。搜索保留 `matched`、`score` 排序信息。
+
+网关自己的工具直接调用。要查看它们，用 `server="mcphub"`：
+
+```text
+search_tools(server="mcphub")
+get_tool_details(server="mcphub", tool="call_tool")
 ```
-mcphub tools show list_tools        看它要什么参数
-mcphub tools call list_servers      直接调它
+
+`call_tool` 只转发到配置中的上游，不调用网关自己的系统工具。上游工具即使也叫
+`search_tools` 或 `call_tool`，照样按指定的上游服务器转发。
+
+资源 `hub://guide` 是本文；`hub://servers/{名字}` 返回服务器的状态、描述及全部
+工具的「名字 → 描述」映射。不需要参数 schema 时，一次读取就能了解一台服务器。
+
+这四个工具在 CLI 和 Web 中单独成组，也可以直接调用：
+
+```text
+mcphub tools show search_tools
+mcphub tools call list_servers
+mcphub tools call search_tools --arg server=files --arg includeSchema=true --arg limit=2
 ```
+
+旧版升级：`get_tool` 改名为 `get_tool_details`；`list_tools` 并入 `search_tools`；
+`list_tags` 和 `update_server_description` 已移除，不保留别名。请让客户端重新连接
+或刷新工具列表。服务器描述仍可在 Web 或配置文件中编辑。
+
+服务器级标签也已移除。先备份配置，手动删除 `mcpServers.<名字>.tags`，再运行
+`mcphub config validate`；未知配置键仍严格报错。上游业务 schema、参数、结果和
+环境变量中的 `tags` 不受影响。CLI 的旧标签命令和选项不再提供，聚合工具、资源
+API 的旧 `tag` 查询参数会明确报错。
 
 ## 会话模式
 
@@ -232,14 +252,12 @@ mcphub tools list --all             连没暴露的一起列，并标出各自�
 mcphub tools show <工具>            看一个工具的完整说明与输入 schema
 mcphub tools call <工具> --arg k=v  调用一个工具
 
-mcphub tags list [--server 名]      列出标签，以及各自被哪些服务器带着
-
 mcphub ui [--print]                 用浏览器打开 Web 界面
 mcphub guide                        输出本文档
 mcphub version                      输出版本
 ```
 
-以 `servers`、`tools`、`tags` 开头的命令，以及 `mcphub status` 与 `mcphub ui`，
+以 `servers`、`tools` 开头的命令，以及 `mcphub status` 与 `mcphub ui`，
 都是**运行中实例的客户端**——它们通过管理 API 询问那个实例，因为只有它知道自己
 实际连上了哪些上游。默认从配置里的 `listen` 取地址，也可以用
 `--address host:port` 指定。

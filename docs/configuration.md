@@ -188,7 +188,6 @@ gateway:
 | `transport`    | 全部          | `stdio`   | `stdio` 或 `streamable-http`                 |
 | `enabled`      | 全部          | `true`    | 为 `false` 时保留在配置和界面里，但不连接      |
 | `description`  | 全部          | *(空)*    | 界面上显示，也会返回给模型帮助它选服务器       |
-| `tags`         | 全部          | *(空)*    | 自由形式的键值元数据，用于分组与筛选，不影响路由 |
 | `timeout`      | 全部          | `60s`     | 单次请求超时                                 |
 | `exposedTools` | 全部          | *(空)*    | 只暴露列出的工具。**不写与写成空列表含义相同：一个都不暴露**，见下 |
 | `command`      | stdio         | —         | 要执行的程序，**必填**                        |
@@ -207,7 +206,7 @@ gateway:
 
 **`exposedTools` 的默认值是"什么都不暴露"，这是刻意的。** 不写这个字段、或者写成
 空列表，含义完全相同：这台服务器的工具**一个都不会出现在** `tools/list` 里，客户端
-连上来看到的只有网关自己的七个系统工具。
+连上来看到的只有网关自己的四个系统工具。
 
 理由是上下文开销。一台服务器十几个工具、每个工具十几个参数，几台服务器就是几百个
 字段的 schema，而它们会进入**每一个**客户端会话的上下文——不管这次会话用不用得上。
@@ -218,10 +217,11 @@ gateway:
 schema、能调用：
 
 ```
-search_tools  →  get_tool  →  call_tool
+search_tools(includeSchema=true)  →  call_tool
 ```
 
-`list_tools` 与 `hub://servers/{名字}` 也都会列出未暴露的工具。差别只在于它们不占
+`search_tools(server="名字")` 与 `hub://servers/{名字}` 也能浏览未暴露的工具。
+已知工具时可用 `get_tool_details` 单独取详情。差别只在于它们不占
 `tools/list` 的位置——**"不在列表里"和"不能用"是两件事**。
 
 想知道哪些还没暴露：`mcphub tools list --all`（未暴露的那一列是 `-`）。
@@ -253,8 +253,6 @@ mcpServers:
       - "@modelcontextprotocol/server-filesystem"
       - /tmp
     timeout: 30s
-    tags:
-      用途: 文件
 
   remote:
     transport: streamable-http
@@ -285,3 +283,21 @@ data/
 只想换配置文件而不换数据目录：`--config /path/to/config.yaml`。
 
 想确认实际用了哪些路径：`mcphub check`。
+
+## 旧版标签配置迁移
+
+网关不再保存服务器级标签，也不再提供标签筛选。旧配置保留
+`mcpServers.<名字>.tags` 时，严格解析会指出未知字段和位置。
+
+1. 备份当前配置文件（路径可在设置页面或启动时的 `--config`、`--data-dir` 参数中确认）。
+2. 手动删除每个服务器定义直属的 `tags` 字段及其值。
+3. 运行 `mcphub config validate`；自定义路径可用 `mcphub --config /路径/config.yaml config validate`。
+4. 验证通过后启动新版，MCP 客户端重新连接或刷新工具列表。
+
+仅删除 mcphub 的服务器元数据。不要全局替换 `tags`：上游工具 schema、调用参数、
+返回结果、环境变量及请求头中的同名字段都可能是业务数据，网关会继续透传。
+已有配置不会被自动迁移或重写。服务器 `description` 仍可通过 Web 或配置编辑。
+
+旧 CLI 标签命令及 `servers add --tag` 已删除；只有原本支持标签筛选的
+`GET /api/tools` 与 `GET /api/resources` 会拒绝旧 `tag` 参数（包括空值），
+不会悄悄返回未筛选的全部结果。

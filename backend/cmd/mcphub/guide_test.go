@@ -105,9 +105,28 @@ func TestGuideMentionsEveryCommand(t *testing.T) {
 // The system tools are the part a model needs explained, so a new or
 // renamed one that never reaches the guide is a real omission.
 func TestGuideDocumentsEverySystemTool(t *testing.T) {
+	section, ok := guide.Section("网关自带的系统工具")
+	if !ok {
+		t.Fatal("the guide has no system-tools section")
+	}
+	// Compare the current table, not mentions anywhere in the document:
+	// migration notes legitimately contain names of removed tools.
+	documented := map[string]bool{}
+	for _, line := range strings.Split(section, "\n") {
+		if rest, ok := strings.CutPrefix(line, "| `"); ok {
+			name, _, _ := strings.Cut(rest, "`")
+			if !gateway.IsSystemTool(name) {
+				t.Errorf("the system-tools table documents unregistered tool %q", name)
+			}
+			if documented[name] {
+				t.Errorf("the system-tools table repeats %q", name)
+			}
+			documented[name] = true
+		}
+	}
 	for _, name := range gateway.SystemToolNames {
-		if !strings.Contains(guide.Text(), name) {
-			t.Errorf("the guide never mentions the system tool %q", name)
+		if !documented[name] {
+			t.Errorf("the system-tools table omits registered tool %q", name)
 		}
 	}
 }

@@ -35,8 +35,6 @@ export interface MCPServer {
   transport: Transport;
   enabled: boolean;
   description?: string;
-  /** Free-form key/value metadata, for grouping and filtering only. */
-  tags?: Record<string, string>;
   timeout: Duration;
 
   /** For stdio, which runs the server as a child process. */
@@ -193,7 +191,6 @@ export interface AggregatedTool {
   exposed: string;
   description?: string;
   inputSchema?: unknown;
-  tags?: Record<string, string>;
   /** Set when the list came from a search, and orders it. */
   score?: number;
 }

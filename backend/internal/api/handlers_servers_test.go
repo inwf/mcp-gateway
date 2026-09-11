@@ -16,7 +16,6 @@ func twoServers(cfg *config.Config) {
 	cfg.MCPServers = map[string]config.MCPServer{
 		"files": server(func(s *config.MCPServer) {
 			s.Description = "the file server"
-			s.Tags = map[string]string{"team": "infra"}
 		}),
 		"notes": server(nil),
 	}

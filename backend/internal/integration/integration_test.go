@@ -54,9 +54,22 @@ type stack struct {
 	Logs      *logging.Store
 }
 
-// start brings up the whole stack with one upstream server per entry in
-// servers, mapping a name to a testmcp mode.
+// start brings up the whole stack with one stdio upstream per entry.
 func start(t *testing.T, servers map[string]string) *stack {
+	t.Helper()
+	configured := make(map[string]config.MCPServer, len(servers))
+	for name, mode := range servers {
+		server, err := testmcp.ServerConfig(mode)
+		if err != nil {
+			t.Fatalf("build the configuration for %s: %v", name, err)
+		}
+		configured[name] = server
+	}
+	return startConfigured(t, configured)
+}
+
+// startConfigured also accepts HTTP upstreams, using the same stack.
+func startConfigured(t *testing.T, servers map[string]config.MCPServer) *stack {
 	t.Helper()
 
 	store := logging.NewStore(500)
@@ -73,15 +86,7 @@ func start(t *testing.T, servers map[string]string) *stack {
 	cfg.Startup.RetryBackoff = time.Millisecond
 	// Publish changes immediately rather than after a quiet window.
 	cfg.Gateway.NotifyDebounce = 0
-	cfg.MCPServers = map[string]config.MCPServer{}
-
-	for name, mode := range servers {
-		server, err := testmcp.ServerConfig(mode)
-		if err != nil {
-			t.Fatalf("build the configuration for %s: %v", name, err)
-		}
-		cfg.MCPServers[name] = server
-	}
+	cfg.MCPServers = servers
 
 	path := t.TempDir() + "/config.yaml"
 	if err := config.Save(path, cfg); err != nil {

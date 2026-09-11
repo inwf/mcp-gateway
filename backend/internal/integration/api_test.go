@@ -269,66 +269,22 @@ func TestSearchingAggregatedTools(t *testing.T) {
 	}
 }
 
-// Tags belong to a server, so filtering by one has to select that
-// server's tools.
-func TestFilteringAggregatedToolsByTag(t *testing.T) {
-	stack := startTagged(t)
-
-	var got struct {
-		Tools []api.AggregatedTool `json:"tools"`
-	}
-	stack.apiGet(t, "/api/tools?tag=team%3Dinfra&limit=100", &got)
-
-	if len(got.Tools) == 0 {
-		t.Fatal("filtering by a tag that exists returned nothing")
-	}
-	for _, tool := range got.Tools {
-		if tool.Server != "tagged" {
-			t.Errorf("%q came from %q, which does not carry the tag", tool.Exposed, tool.Server)
+// An obsolete filter must not silently broaden an existing client's query.
+func TestRemovedTagFiltersAreRejectedOnlyOnAggregatedEndpoints(t *testing.T) {
+	stack := start(t, map[string]string{"files": "full"})
+	for _, path := range []string{
+		"/api/tools?tag=team%3Dinfra", "/api/tools?q=echo&tag=team",
+		"/api/resources?tag=team", "/api/resources?tag=", "/api/tools?tag",
+	} {
+		var response map[string]any
+		stack.apiDo(t, http.MethodGet, path, nil, http.StatusBadRequest, &response)
+		encoded, _ := json.Marshal(response)
+		if !strings.Contains(string(encoded), "tag") || !strings.Contains(string(encoded), "removed") {
+			t.Errorf("%s did not explain the removed filter: %s", path, encoded)
 		}
 	}
-}
-
-// A bare tag key matches whatever value a server carries for it.
-func TestFilteringAggregatedToolsByTagKeyAlone(t *testing.T) {
-	stack := startTagged(t)
-
-	var got struct {
-		Tools []api.AggregatedTool `json:"tools"`
-	}
-	stack.apiGet(t, "/api/tools?tag=team&limit=100", &got)
-
-	if len(got.Tools) == 0 {
-		t.Fatal("filtering by a tag key returned nothing")
-	}
-	for _, tool := range got.Tools {
-		if tool.Server != "tagged" {
-			t.Errorf("%q came from %q, which carries no team tag", tool.Exposed, tool.Server)
-		}
-	}
-}
-
-// A search and a tag filter have to compose: adding a second filter
-// should narrow the result, not replace the first.
-func TestASearchAndATagFilterCompose(t *testing.T) {
-	stack := startTagged(t)
-
-	var got struct {
-		Tools []api.AggregatedTool `json:"tools"`
-	}
-	stack.apiGet(t, "/api/tools?q=echo&tag=team%3Dinfra&limit=100", &got)
-
-	if len(got.Tools) == 0 {
-		t.Fatal("a search combined with a tag filter returned nothing")
-	}
-	for _, tool := range got.Tools {
-		if tool.Server != "tagged" {
-			t.Errorf("%q ignored the tag filter", tool.Exposed)
-		}
-		if !strings.Contains(tool.Exposed, "echo") {
-			t.Errorf("%q ignored the search term", tool.Exposed)
-		}
-	}
+	// A field in the upstream namespace is not a gateway filter.
+	stack.apiGet(t, "/api/servers/files/tools?tag=business", nil)
 }
 
 // exposeOnly narrows a server's allow list to the named tools.
@@ -348,22 +304,6 @@ func exposeOnly(t *testing.T, stack *stack, server string, tools ...string) {
 		t.Fatalf("narrow the allow list for %s: %v", server, err)
 	}
 	stack.Gateway.Sync()
-}
-
-// startTagged brings up two servers, only one of which carries tags.
-func startTagged(t *testing.T) *stack {
-	t.Helper()
-
-	stack := start(t, map[string]string{"tagged": "full", "plain": "full"})
-	if _, err := stack.Configs.Update(func(c *config.Config) error {
-		server := c.MCPServers["tagged"]
-		server.Tags = map[string]string{"team": "infra"}
-		c.MCPServers["tagged"] = server
-		return nil
-	}); err != nil {
-		t.Fatalf("tag a server: %v", err)
-	}
-	return stack
 }
 
 func TestTheAPIAggregatesResourcesAcrossServers(t *testing.T) {

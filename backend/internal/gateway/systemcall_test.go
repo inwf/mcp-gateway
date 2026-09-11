@@ -40,13 +40,13 @@ func TestASystemToolCanBeCalled(t *testing.T) {
 func TestASystemToolReceivesItsArguments(t *testing.T) {
 	_, g := gatewayOn(t, twoServers(), nil)
 
-	result, err := g.CallSystemTool(t.Context(), gateway.ToolListTools,
+	result, err := g.CallSystemTool(t.Context(), gateway.ToolSearchTools,
 		map[string]any{"server": "files"})
 	if err != nil {
-		t.Fatalf("call %s: %v", gateway.ToolListTools, err)
+		t.Fatalf("call %s: %v", gateway.ToolSearchTools, err)
 	}
 	if result.IsError {
-		t.Fatalf("%s reported an error: %s", gateway.ToolListTools, resultText(result))
+		t.Fatalf("%s reported an error: %s", gateway.ToolSearchTools, resultText(result))
 	}
 
 	answer := resultText(result) + fmt.Sprint(result.StructuredContent)
@@ -62,10 +62,10 @@ func TestASystemToolReceivesItsArguments(t *testing.T) {
 func TestASystemToolsOwnErrorComesBackAsAResult(t *testing.T) {
 	_, g := gatewayOn(t, twoServers(), nil)
 
-	result, err := g.CallSystemTool(t.Context(), gateway.ToolListTools,
+	result, err := g.CallSystemTool(t.Context(), gateway.ToolSearchTools,
 		map[string]any{"server": "nowhere"})
 	if err != nil {
-		t.Fatalf("call %s: %v", gateway.ToolListTools, err)
+		t.Fatalf("call %s: %v", gateway.ToolSearchTools, err)
 	}
 	if !result.IsError {
 		t.Fatal("asking about a server that does not exist was reported as a success")
@@ -81,7 +81,7 @@ func TestASystemToolsOwnErrorComesBackAsAResult(t *testing.T) {
 func TestASystemToolRejectsAnArgumentOfTheWrongType(t *testing.T) {
 	_, g := gatewayOn(t, twoServers(), nil)
 
-	result, err := g.CallSystemTool(t.Context(), gateway.ToolListTools,
+	result, err := g.CallSystemTool(t.Context(), gateway.ToolSearchTools,
 		map[string]any{"server": 42})
 
 	// The SDK may refuse this as a protocol error or as a failed result,

@@ -344,7 +344,7 @@ export default function Tools() {
   // The search runs on the gateway rather than here: it scores matches
   // across every connected server, and the result order is that score.
   const tools = useQuery({
-    queryKey: keys.tools.aggregated(search, [], true),
+    queryKey: keys.tools.aggregated(search, true),
     queryFn: () => endpoints.tools({ ...(search ? { search } : {}), limit: LIMIT, all: true }),
   });
 

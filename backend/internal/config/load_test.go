@@ -52,8 +52,6 @@ mcpServers:
     command: npx
     args: ["-y", "server-filesystem"]
     timeout: 90s
-    tags:
-      env: prod
 `)
 
 	cfg, err := config.Load(path)
@@ -92,9 +90,6 @@ mcpServers:
 	}
 	if files.Timeout != 90*time.Second {
 		t.Errorf("mcpServers.files.timeout = %v, want 90s", files.Timeout)
-	}
-	if files.Tags["env"] != "prod" {
-		t.Errorf("mcpServers.files.tags = %v, want env=prod", files.Tags)
 	}
 }
 

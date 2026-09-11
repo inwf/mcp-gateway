@@ -141,7 +141,7 @@ func ExposedByServer(all map[string][]*mcp.Tool, cfg config.Config) map[string][
 // This is the one place that answers "what does a client call this tool".
 // Having two answers is what went wrong before: the system tools worked
 // out names over every upstream tool while Sync registered only the
-// exposed ones, so list_tools handed out names that were never
+// exposed ones, so search_tools handed out names that were never
 // registered. Worse, an unexposed tool sharing a name with an exposed one
 // counted as a collision on one side and not the other, so even an
 // exposed tool could be reported under the wrong name.
@@ -164,7 +164,7 @@ func PublishedNames(all map[string][]*mcp.Tool, cfg config.Config) NameMap {
 //
 // It costs nothing in reach. A tool that is not exposed is still
 // callable: the gateway's own call_tool reads the unfiltered upstream
-// state, as do list_tools, get_tool and search_tools. A model finds what
+// state, as do get_tool_details and search_tools. A model finds what
 // it needs through those and calls it by name. "Not exposed" means "not
 // in the opening hand", not "unavailable" — one extra round trip in
 // exchange for not paying for every tool up front.

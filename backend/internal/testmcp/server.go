@@ -42,6 +42,10 @@ const (
 	// what capability-aware refreshing has to cope with.
 	ModeToolsOnly = "tools-only"
 
+	// ModeDiscovery adds tools whose names overlap gateway system tools,
+	// and whose schema, arguments and results contain business tags.
+	ModeDiscovery = "discovery"
+
 	// ModeNoisyStderr writes to standard error before serving.
 	ModeNoisyStderr = "noisy-stderr"
 
@@ -103,7 +107,8 @@ func ServeIfRequested() (served bool, code int) {
 var ToolNames = []string{"echo", "sleep", "grow", "grown", "fail"}
 
 // ServerConfig returns a stdio server configuration that runs this test
-// binary in the given mode, with every tool exposed.
+// binary in the given mode, with the common tools exposed. Discovery
+// mode's extra tools stay hidden so tests exercise discovery and routing.
 func ServerConfig(mode string) (config.MCPServer, error) {
 	self, err := os.Executable()
 	if err != nil {
@@ -193,6 +198,19 @@ func newServer(mode string) *mcp.Server {
 		}, nil, nil
 	})
 
+	if mode == ModeDiscovery {
+		for _, name := range []string{"search_tools", "call_tool"} {
+			mcp.AddTool(server, &mcp.Tool{
+				Name:        name,
+				Title:       "Business metadata",
+				Description: "returns business metadata unchanged",
+				Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+			}, func(_ context.Context, _ *mcp.CallToolRequest, in businessMetadata) (*mcp.CallToolResult, businessMetadata, error) {
+				return nil, in, nil
+			})
+		}
+	}
+
 	if mode == ModeFull {
 		server.AddResource(
 			&mcp.Resource{URI: GreetingURI, Name: "greeting", MIMEType: "text/plain"},
@@ -211,6 +229,10 @@ func newServer(mode string) *mcp.Server {
 // EchoInput is the argument shape of the echo tool.
 type EchoInput struct {
 	Message string `json:"message"`
+}
+
+type businessMetadata struct {
+	Tags []string `json:"tags"`
 }
 
 func echoTool(_ context.Context, _ *mcp.CallToolRequest, in EchoInput) (*mcp.CallToolResult, any, error) {

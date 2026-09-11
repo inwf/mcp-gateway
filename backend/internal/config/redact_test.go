@@ -19,7 +19,6 @@ func TestCloneIsDeep(t *testing.T) {
 	srv := clone.MCPServers["files"]
 	srv.Args[0] = "--mutated"
 	srv.Env["LOG"] = "mutated"
-	srv.Tags["env"] = "mutated"
 	clone.MCPServers["files"] = srv
 	clone.MCPServers["added-later"] = config.MCPServer{Transport: config.TransportStdio}
 
@@ -34,9 +33,6 @@ func TestCloneIsDeep(t *testing.T) {
 	}
 	if original.MCPServers["files"].Env["LOG"] != "debug" {
 		t.Error("server env is shared with the clone")
-	}
-	if original.MCPServers["files"].Tags["env"] != "prod" {
-		t.Error("server tags are shared with the clone")
 	}
 	if _, leaked := original.MCPServers["added-later"]; leaked {
 		t.Error("the server map is shared with the clone")

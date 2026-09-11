@@ -26,9 +26,8 @@ type AggregatedTool struct {
 	// Exposed is the name the gateway offers it under.
 	Exposed string `json:"exposed"`
 
-	Description string            `json:"description,omitempty"`
-	InputSchema any               `json:"inputSchema,omitempty"`
-	Tags        map[string]string `json:"tags,omitempty"`
+	Description string `json:"description,omitempty"`
+	InputSchema any    `json:"inputSchema,omitempty"`
 
 	// Score is set when the list came from a search, and orders it.
 	Score int `json:"score,omitempty"`
@@ -37,6 +36,9 @@ type AggregatedTool struct {
 // ===== step 64: aggregated tools and resources =====
 
 func (a *API) handleAggregatedTools(c *gin.Context) {
+	if rejectLegacyTagFilter(c) {
+		return
+	}
 	if a.opts.Upstreams == nil {
 		c.JSON(http.StatusOK, gin.H{"tools": []AggregatedTool{}})
 		return
@@ -63,23 +65,17 @@ func (a *API) handleAggregatedTools(c *gin.Context) {
 	// exposure is decided, so showing only what is already exposed leaves
 	// nothing to decide about — and on a fresh installation, nothing at
 	// all. The unexposed ones come back with an empty exposed name, which
-	// is the same signal list_tools gives.
+	// is the same signal search_tools gives.
 	all, err := queryBool(c, "all", false)
 	if err != nil {
 		fail(c, err)
 		return
 	}
 
-	// Tag filters are applied to the servers first, because a tag
-	// belongs to a server rather than to a tool.
-	wanted := parseTagFilter(c.QueryArray("tag"))
 	tools := make([]AggregatedTool, 0, names.Len())
 
 	for server, list := range byServer {
 		serverCfg := cfg.MCPServers[server]
-		if !matchesTags(serverCfg.Tags, wanted) {
-			continue
-		}
 		offered := list
 		if !all {
 			offered = gateway.FilterTools(list, serverCfg.ExposedTools)
@@ -95,7 +91,6 @@ func (a *API) handleAggregatedTools(c *gin.Context) {
 				Exposed:     exposed,
 				Description: tool.Description,
 				InputSchema: tool.InputSchema,
-				Tags:        serverCfg.Tags,
 			})
 		}
 	}
@@ -120,8 +115,7 @@ func (a *API) handleAggregatedTools(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"tools": tools, "total": len(tools)})
 }
 
-// searchWithin ranks the already-filtered tools, so that a search and a
-// tag filter compose rather than one overriding the other.
+// searchWithin ranks tools after the exposure filter has been applied.
 func searchWithin(query string, tools []AggregatedTool, limit int) []AggregatedTool {
 	candidates := make([]gateway.Searchable, 0, len(tools))
 	for _, tool := range tools {
@@ -155,43 +149,14 @@ func searchWithin(query string, tools []AggregatedTool, limit int) []AggregatedT
 	return out
 }
 
-// parseTagFilter reads repeated tag parameters, each "key" or
-// "key=value". A bare key matches a server carrying that key whatever
-// its value.
-func parseTagFilter(raw []string) map[string]string {
-	if len(raw) == 0 {
-		return nil
+// Only the endpoints that formerly filtered by tag reject it. Silently
+// returning an unfiltered result would broaden an existing client's query.
+func rejectLegacyTagFilter(c *gin.Context) bool {
+	if c.Request.URL.Query().Has("tag") {
+		fail(c, BadRequest("the tag filter has been removed; remove the tag query parameter"))
+		return true
 	}
-	wanted := make(map[string]string, len(raw))
-	for _, entry := range raw {
-		key, value, hasValue := strings.Cut(entry, "=")
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if hasValue {
-			wanted[key] = strings.TrimSpace(value)
-		} else {
-			wanted[key] = ""
-		}
-	}
-	return wanted
-}
-
-// matchesTags reports whether a server's tags satisfy every filter.
-// Filters combine with "and": each one narrows the result further, which
-// is what a user adding a second filter expects.
-func matchesTags(tags, wanted map[string]string) bool {
-	for key, value := range wanted {
-		have, present := tags[key]
-		if !present {
-			return false
-		}
-		if value != "" && have != value {
-			return false
-		}
-	}
-	return true
+	return false
 }
 
 // AggregatedResource is one upstream resource with its origin.
@@ -210,19 +175,16 @@ type AggregatedResource struct {
 }
 
 func (a *API) handleAggregatedResources(c *gin.Context) {
+	if rejectLegacyTagFilter(c) {
+		return
+	}
 	if a.opts.Upstreams == nil {
 		c.JSON(http.StatusOK, gin.H{"resources": []AggregatedResource{}})
 		return
 	}
 
-	cfg := a.opts.Configs.Get()
-	wanted := parseTagFilter(c.QueryArray("tag"))
-
 	out := []AggregatedResource{}
 	for server, resources := range a.opts.Upstreams.Resources() {
-		if !matchesTags(cfg.MCPServers[server].Tags, wanted) {
-			continue
-		}
 		for _, resource := range resources {
 			out = append(out, AggregatedResource{
 				Server:      server,

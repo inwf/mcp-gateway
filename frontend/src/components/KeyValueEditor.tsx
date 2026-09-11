@@ -9,7 +9,7 @@ import styles from './KeyValueEditor.module.css';
 /*
  * Editors for the two list-shaped kinds of field on a server: plain
  * lists of strings (arguments, ready patterns, exposed tools) and maps
- * of string to string (environment, headers, tags).
+ * of string to string (environment and headers).
  *
  * Both own their rows rather than deriving them from the value on every
  * render, because the value has no place to put a half-typed row. A map

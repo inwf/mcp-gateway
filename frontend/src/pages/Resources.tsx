@@ -101,7 +101,7 @@ export default function Resources() {
   const selectedUri = params.get('uri') ?? '';
 
   const resources = useQuery({
-    queryKey: keys.resources.aggregated([]),
+    queryKey: keys.resources.aggregated(),
     queryFn: () => endpoints.resources(),
   });
 

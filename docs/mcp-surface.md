@@ -1,69 +1,100 @@
-# 网关对模型说了什么
+# 网关对模型提供的接口
 
-这份文档记录的是 mcphub 的 **MCP 面**：一个只连上 `/mcp` 的客户端，在调用任何
-东西之前能读到什么，以及每个系统工具答什么。
+默认 `tools/list` 只有四个系统工具。配置 `exposedTools` 后，被选中的上游工具
+也会出现在列表里；未暴露的工具仍可通过系统工具搜索、查看详情和调用。
 
-写下来是因为它容易被漏掉。功能对照容易对「有没有这个工具」，不容易对「这个工具
-说了什么」——而对一个模型来说，后者就是全部。曾经有一次真实会话，客户端把
-理想的 4 次调用花成了约 10 次，原因不是缺功能，是握手时那段自述里没提
-`call_tool`。
+## 发现与调用
 
-## 三层自述
-
-模型能拿到的说明有三层，从便宜到详细：
-
-| 层 | 内容 | 什么时候被读到 |
+| 工具 | 输入 | 返回 |
 | --- | --- | --- |
-| `initialize` 的 `instructions` | 五段散文：怎么找、怎么调、系统工具直接调、两份资源在哪 | 握手时，**在调用任何东西之前** |
-| 每个工具的 `description` 与入参说明 | 这个工具做什么、参数怎么填、什么时候不必再搜一遍 | 客户端加载工具 schema 时 |
-| `hub://guide` 资源 | 完整使用指南（与 `mcphub guide` 同一份文件） | 模型主动读，由 `instructions` 指路 |
+| `list_servers` | 无 | 配置的服务器名称、描述、状态、握手 title、工具/资源数量和错误 |
+| `search_tools` | `query` 或 `server`，可加 `limit`、`includeSchema`、`cursor` | `hits`、可选 `nextCursor` 和 `unmatched` |
+| `get_tool_details` | `server`、`tool` | 标识、对外名、描述、title、完整输入 schema、annotations |
+| `call_tool` | `server`、`tool`、可选 `args` | 上游原始结果，包括业务错误 |
 
-**第一层最关键**，因为它是唯一一层「不需要模型先想到去读」的。它必须提到全部
-七个系统工具的名字和 `hub://guide` 的 URI——有一条测试遍历
-`gateway.SystemToolNames` 来钉住这一点，因为散文没有类型检查。
+已知目标时直接 `search_tools`，不必先列所有服务器。准备调用时可设置
+`includeSchema=true`，一次搜索就获得参数定义；已知工具也能单独取详情。
+已知 `server`、`tool` 和参数时直接调用，无需重复搜索。系统工具本身直接调用。
 
-## 渐进式披露，以及它带来的义务
+搜索和详情以 **`server` + `tool`** 标识一个工具，避免不同上游的短名冲突。
+`exposed` 为可直接调用的发布名，未暴露时为空。上游工具即使与系统工具同名，
+`call_tool` 也按指定的上游转发。
 
-默认**一个上游工具都不暴露**：`tools/list` 里只有七个系统工具。这是有意的，
-为的是不把几百个工具的 schema 塞进每个会话的上下文（见 `exposedTools`）。
+## 搜索参数与分页
 
-代价是模型看到的世界默认是空的，所以网关欠它两句话，两句都在 `instructions`
-里：
-
-- 未暴露的工具**照样能被发现**（`list_tools` / `search_tools` / `hub://servers/{名字}`）；
-- 未暴露的工具**照样能被调用**（`call_tool(server, tool, args)`）。
-
-「不在列表里」和「不能用」是两件事。管理面的 CLI 早就把这句话印给人看了
-（`mcphub tools list --all` 的表尾），MCP 面给模型说同一句话是后补的。
-
-## 七个系统工具答什么
-
-| 工具 | 要点 |
+| 参数 | 规则 |
 | --- | --- |
-| `list_servers` | 全部配置的服务器，含未连接的（状态与错误本身就是信息）。带握手拿到的 `title`——配置名常是简写，`xingzuo` 那台自称「星座 MCP 服务」。没人写描述时，`description` 说明这一点并点名 `update_server_description` |
-| `list_tools` | 名字 + 对外名 + 描述，**一次一台服务器**。`server="mcphub"` 问的是网关自己的七个工具。跨服务器要用 `search_tools`（有 limit）或 `list_servers`（每台一行） |
-| `get_tool` | 完整输入 schema、`annotations`、`title`。暴露与否不该改变一个工具被描述得多清楚——`annotations.readOnlyHint` 决定的是「要不要调」。**输出 schema 有意不给**：网关原样转发上游结果，调用方迟早看到真内容，而实测有服务器的输出 schema 比输入 schema 大三倍。`server="mcphub"` 取系统工具自己的 schema，从服务器读回来而不是手写 |
-| `call_tool` | 调用上游工具的唯一入口。入参说明里写了「已经知道服务器名就直接调，不要再搜一遍」 |
-| `search_tools` | 多个词**放宽**而不是收紧：命中词数是第一排序键，没命中的词报在 `unmatched` 里。这样空结果永远能和「这套装置没这个能力」区分开 |
-| `list_tags` | 服务器级标签，`server` 可选 |
-| `update_server_description` | 写进配置文件。对 `mcphub` 明确拒绝——网关自己不是被代理的服务器 |
+| `query` | 可省略；匹配工具名、工具描述、服务器名、握手名称与服务器描述 |
+| `server` | 可省略；准确的配置名，或 `mcphub`；仅给此项时浏览单台服务器 |
+| `limit` | 默认 5，范围 1–20；两种 schema 模式相同，显式 0 也拒绝 |
+| `includeSchema` | 默认 false；true 时给所选候选附上完整输入 schema、title 和 annotations |
+| `cursor` | 上一页的 `nextCursor`；必须配合相同的 query 和 server |
 
-## 两份资源
+`query` 和 `server` 至少有一个非空值。多个关键词按 OR 匹配：命中词数
+`matched` 优先，其次按位置权重 `score` 排序，最后以服务器名和工具名稳定排序。
+名称匹配优先于描述。没有匹配任何候选的词放在 `unmatched`，不抹掉其他词的结果。
 
-- `hub://guide` —— 本仓库的使用指南全文，`text/markdown`。永远存在，在
-  `resources/list` 里排第一。
-- `hub://servers/{名字}` —— 一台服务器的状态、握手信息、标签、描述，加上它
-  全部工具的「名字 → 描述」映射。**一次读取看完一台服务器**，不必为了看懂七个
-  工具打七次 `get_tool`。工具描述是上游原样透传的，为空就是上游自己没写。
+```json
+{"query":"read file","includeSchema":true,"limit":2}
+```
 
-此外每个上游资源都有一个 `hub://servers/{名字}/{转义后的上游 URI}` 的替身，
-读它等于读上游那份。
+```json
+{
+  "query":"read file",
+  "hits":[
+    {
+      "server":"files",
+      "tool":"read",
+      "exposed":"",
+      "description":"read a file",
+      "matched":2,
+      "score":1150,
+      "inputSchema":{"type":"object","properties":{"path":{"type":"string"}}}
+    }
+  ]
+}
+```
 
-## 报错也要教用法
+示例只展示结果结构；具体 score 取决于工具名、服务器名和描述的匹配位置。
+`nextCursor` 仅在还有结果时返回，最后一页省略。翻页可以改变 `limit` 或
+`includeSchema`，但 query/server 必须保持相同含义；query 忽略大小写和词间空白。
 
-一个模型学不到东西的报错，会让它把同一个错再犯一遍。所以：
+游标只包含位置以及查询和有序结果标识的哈希，不在网关保存快照。匹配结果增减、
+顺序变化时拒绝旧游标，并提示去掉 cursor 重查；无关上游变化不影响它。schema
+更新且顺序未变时，下一页返回最新详情。翻页过程中每次都读现有缓存，不发上游
+发现请求，也不维护持久索引。
 
-- 问某台服务器要一个系统工具时（客户端猜网关叫什么，必然猜错），报错除了列出
-  真实的服务器名，还会说明这个工具是网关自己的、直接调、不要传服务器名。
-- 拿 `mcphub` 当上游服务器用时，报错说明它是网关本身，并告诉调用方
-  `list_tools` / `get_tool` 接受这个名字。
+schema 不截断，也没有额外的 3 条硬上限或字节预算。需要控制响应大小时，调用方
+可先取摘要或降低 limit；准备调用通常只需 1–3 个候选。详情继续不返回输出
+schema；调用结果原样透传。
+
+## 网关自身与资源
+
+`search_tools(server="mcphub")` 浏览这四个系统工具，
+`get_tool_details(server="mcphub", tool="call_tool")` 取得注册时生成的真实 schema。
+跨上游搜索不会夹带系统工具。把网关本身当上游调用时，会提示直接调用系统工具；
+`call_tool` 的实际目标由上游配置决定。
+
+- `hub://guide` 是完整指南，与 `mcphub guide` 共用一份文档。
+- `hub://servers/{名字}` 返回服务器状态、握手信息、描述及全部工具的名字到描述映射。
+- 上游资源通过 `hub://servers/{名字}/{转义后的上游 URI}` 读取。
+
+服务器没有描述时省略该字段，不在每条结果中重复补写提示。服务器描述仍可从 Web
+或配置维护。
+
+`initialize.instructions` 会说明上述发现和调用路径，并指向指南。测试把工具名
+与实际注册清单对照，防止文案在工具改名后继续指向旧入口。
+
+## 兼容性与升级
+
+`get_tool` 改名为 `get_tool_details`；旧系统工具 `list_tools` 合并到搜索，
+`list_tags`、`update_server_description` 删除，不保留别名。MCP 协议的
+`tools/list`、CLI 的 `tools list`、上游工具暴露配置继续使用。
+
+旧服务器级标签需按[配置迁移](configuration.md#旧版标签配置迁移)手动移除。
+网关不会删除上游 schema、参数或结果中名为 `tags` 的业务字段。
+升级后让 MCP 客户端重新连接或刷新工具列表。
+
+Go 输出类型中的 schema 字段使用 `map[string]any`，避免生成布尔属性 schema
+导致 TypeScript MCP SDK 拒绝整个工具列表。兼容性检查同时覆盖 `tools/list`
+和带 schema 的搜索结果，不能只依靠同语言单元测试。

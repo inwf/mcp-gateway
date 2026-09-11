@@ -19,8 +19,8 @@ Claude Code ─┐                        ┌─ stdio 子进程（filesystem、
 - **上下文被工具塞满。** 几百个工具的完整 schema 一次性进上下文，代价不小。
 - **出了问题看不见。** 某台服务器起不来时，客户端通常只是"那个工具不见了"。
 
-mcphub 对应的做法是：客户端只配一个地址；提供 `search_tools` / `get_tool` /
-`call_tool` 这类系统工具，让模型**先找再调**而不是全量加载；并给出一个 Web 界面
+mcphub 对应的做法是：客户端只配一个地址；提供 `search_tools` / `get_tool_details` /
+`call_tool` 这类系统工具，让模型按需发现工具，也能在一次搜索中取得调用所需的 schema；并给出一个 Web 界面
 和一套 CLI，能看到每台服务器的状态、日志和它报的错。
 
 ## 快速开始
@@ -75,11 +75,24 @@ mcphub servers list
   一个 `read` 也不会撞名。
 - **两种上游传输**：`stdio`（由 mcphub 拉起子进程）与 `streamable-http`（连接
   已在运行的服务）。
-- **七个系统工具**，让模型按需检索工具而不是全量加载。
+- **四个系统工具**，让模型按需检索工具而不是全量加载。
 - **Web 界面**：服务器状态、工具与资源浏览、实时日志、配置编辑。
-- **CLI**：`servers` / `tools` / `tags` / `ui` / `config validate` / `guide`。
+- **CLI**：`servers` / `tools` / `ui` / `config validate` / `guide`。
 - **单个二进制**。前端在构建时嵌入，部署时不需要另外准备静态文件。
 - **所有产生的文件都在数据目录内**（默认 `./data`），不往主目录里散落东西。
+
+## 从旧版升级
+
+系统工具现为 `list_servers`、`search_tools`、`get_tool_details`、`call_tool`。
+`get_tool` 已改名，`list_tools` 的单服务浏览并入 `search_tools(server=...)`；
+`list_tags`、`update_server_description` 已移除，不保留旧别名。升级后请让 MCP
+客户端重新连接或刷新工具列表。服务器描述仍可通过 Web 界面或配置编辑。
+
+旧配置中的 **`mcpServers.<名字>.tags` 需要手动删除**。请先备份配置，再移除
+这一服务器级字段并运行 `mcphub config validate`；不会自动重写已有配置。
+不要删除上游工具 schema、调用参数、结果或环境变量中的同名业务字段。
+完整说明见 [配置迁移](docs/configuration.md#旧版标签配置迁移)；
+搜索参数及分页规则见 [MCP 接口说明](docs/mcp-surface.md)。
 
 ## 构建与开发
 
@@ -100,6 +113,8 @@ cd frontend && pnpm dev
 
 开发服务器会把 `/api`、`/ws`、`/mcp` 代理到网关，并**保留页面自身的来源**——
 这样网关的 WebSocket 来源检查是被真正走了一遍，而不是被绕过去。
+
+工具发现的基准、实测数据和跨语言 SDK 复测命令见 [性能与兼容性验证](docs/performance.md)。
 
 `make check` 包含：
 

@@ -67,7 +67,7 @@ func TestInitializeCarriesInstructions(t *testing.T) {
 	if instructions == "" {
 		t.Fatal("no instructions were returned")
 	}
-	for _, want := range []string{gateway.ToolListServers, gateway.ToolSearchTools, gateway.ToolGetTool} {
+	for _, want := range []string{gateway.ToolListServers, gateway.ToolSearchTools, gateway.ToolGetToolDetails} {
 		if !strings.Contains(instructions, want) {
 			t.Errorf("instructions do not mention %q:\n%s", want, instructions)
 		}

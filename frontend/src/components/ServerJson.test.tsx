@@ -69,6 +69,18 @@ describe('reading pasted JSON', () => {
   it('reports where the JSON went wrong', () => {
     expect(() => readPastedServer('{oops')).toThrow(/.+/);
   });
+
+  it('rejects legacy server tags while preserving an upstream environment field with that name', () => {
+    for (const text of [
+      '{"command":"npx","tags":{}}',
+      '{"mcpServers":{"files":{"command":"npx","tags":{"env":"dev"}}}}',
+    ]) {
+      expect(() => readPastedServer(text)).toThrow('jsonServerTagsRemoved');
+    }
+    expect(readPastedServer('{"command":"npx","env":{"tags":"business"}}')).toEqual({
+      server: { command: 'npx', env: { tags: 'business' } },
+    });
+  });
 });
 
 // Pasted JSON is allowed to be as short as the gateway allows, and the

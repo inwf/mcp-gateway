@@ -22,10 +22,9 @@ type serverListResponse struct {
 type serverRow struct {
 	Name   string `json:"name"`
 	Config struct {
-		Transport   string            `json:"transport"`
-		Enabled     bool              `json:"enabled"`
-		Description string            `json:"description"`
-		Tags        map[string]string `json:"tags"`
+		Transport   string `json:"transport"`
+		Enabled     bool   `json:"enabled"`
+		Description string `json:"description"`
 	} `json:"config"`
 	Status struct {
 		State         string `json:"state"`

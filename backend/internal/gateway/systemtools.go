@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -12,45 +13,32 @@ import (
 	"mcphub/internal/upstream"
 )
 
-// The gateway's own tools, as opposed to the upstream tools it forwards.
-// A model discovers what is available through these.
 const (
-	ToolListServers             = "list_servers"
-	ToolListTools               = "list_tools"
-	ToolGetTool                 = "get_tool"
-	ToolCallTool                = "call_tool"
-	ToolSearchTools             = "search_tools"
-	ToolListTags                = "list_tags"
-	ToolUpdateServerDescription = "update_server_description"
+	ToolListServers    = "list_servers"
+	ToolSearchTools    = "search_tools"
+	ToolGetToolDetails = "get_tool_details"
+	ToolCallTool       = "call_tool"
 )
 
-// Name is what the gateway calls itself: in the handshake, as the binary
-// on disk, and as the server name that list_tools and get_tool accept when
-// asked about the gateway's own tools. One name for one thing — a client
-// knows the gateway by whatever its own configuration calls it, and that
-// is not something the gateway can be told.
+// Name identifies the gateway in the handshake and in discovery calls
+// that ask about its own tools.
 const Name = "mcphub"
 
 // SystemToolNames lists every gateway tool, for callers that need to
 // tell them apart from forwarded ones.
 var SystemToolNames = []string{
 	ToolListServers,
-	ToolListTools,
-	ToolGetTool,
-	ToolCallTool,
 	ToolSearchTools,
-	ToolListTags,
-	ToolUpdateServerDescription,
+	ToolGetToolDetails,
+	ToolCallTool,
 }
 
-// IsSystemTool reports whether a name belongs to the gateway itself.
 func IsSystemTool(name string) bool {
 	return slices.Contains(SystemToolNames, name)
 }
 
-// Upstreams is what the system tools need from the set of connected
-// servers. Narrowing it to this keeps the tools testable without running
-// real child processes.
+// Upstreams is the cached upstream directory and the operations the
+// gateway forwards. Discovery never opens new upstream connections.
 type Upstreams interface {
 	Statuses() []upstream.Status
 	Tools() map[string][]*mcp.Tool
@@ -59,259 +47,134 @@ type Upstreams interface {
 	ReadResource(ctx context.Context, server, uri string) (*mcp.ReadResourceResult, error)
 }
 
-// Configs is what the system tools need from the configuration.
+// Configs is the read-only configuration view needed by system tools.
 type Configs interface {
 	Get() config.Config
-	Update(mutate func(*config.Config) error) ([]config.Change, error)
 }
 
-// OwnTools reports the gateway's own tools as its server publishes them,
-// schemas and all.
-//
-// A function rather than a slice because the tools cannot be read back
-// until they are registered, and registering them is what needs this. See
-// [Gateway.SystemTools] for how the reading back works and why it is not a
-// hand-written list.
-//
-// May be nil, for a caller registering these tools on a server it does not
-// own: the gateway's own name then means nothing to list_tools and
-// get_tool, as it would to any server that is not this one.
+// OwnTools reads the registered system tools, including their generated
+// schemas. It may be nil when registration is used outside a Gateway.
 type OwnTools func() []*mcp.Tool
-
-// ===== list_servers =====
 
 type listServersInput struct{}
 
 // ServerSummary describes one configured server.
 type ServerSummary struct {
-	Name  string `json:"name"`
-	State string `json:"state"`
-
-	// Title is the name the server called itself during the handshake,
-	// reported when it differs from the name it is configured under.
-	//
-	// The configured name is chosen by whoever wrote the file and is often
-	// a shorthand — "xingzuo" for a server that calls itself 星座 MCP 服务.
-	// A caller deciding whether a server is worth opening has nothing else
-	// to go on when no description has been recorded, and the gateway has
-	// had this string since the handshake.
-	Title string `json:"title,omitempty"`
-
-	Description   string            `json:"description,omitempty"`
-	Tags          map[string]string `json:"tags,omitempty"`
-	ToolCount     int               `json:"toolCount"`
-	ResourceCount int               `json:"resourceCount"`
-	Error         string            `json:"error,omitempty"`
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	Title         string `json:"title,omitempty"`
+	Description   string `json:"description,omitempty"`
+	ToolCount     int    `json:"toolCount"`
+	ResourceCount int    `json:"resourceCount"`
+	Error         string `json:"error,omitempty"`
 }
-
-// A server nobody has described says so, and names both ways out: look at
-// what it offers, or record what you concluded. Two wordings because the
-// tools are in front of the reader in one case and a call away in the
-// other, and a sentence that points at something absent is worse than none.
-const (
-	undescribedInList     = "no description has been recorded; list_tools shows what this server offers, and update_server_description saves a description for it"
-	undescribedInResource = "no description has been recorded; the tools below are what this server offers, and update_server_description saves a description for it"
-)
 
 type listServersOutput struct {
 	Servers []ServerSummary `json:"servers"`
 }
 
-// ===== list_tools =====
-
-type listToolsInput struct {
-	Server string `json:"server" jsonschema:"exact name of the MCP server, as returned by list_servers, or \"mcphub\" for this gateway's own tools"`
+type getToolDetailsInput struct {
+	Server string `json:"server" jsonschema:"exact MCP server name; use mcphub for this gateway's own tools"`
+	Tool   string `json:"tool" jsonschema:"exact tool name on that server"`
 }
 
-// ToolSummary is a tool without its full schema, which is what a model
-// needs to decide whether to look closer.
-type ToolSummary struct {
-	Name        string `json:"name"`
-	Exposed     string `json:"exposed"`
-	Description string `json:"description,omitempty"`
-}
-
-// listToolsOutput answers about one server.
-//
-// One server per call on purpose. An "every server" mode was written and
-// then taken out again: it is the cheapest-looking call in the whole
-// interface and its cost is the size of the installation, so on the
-// installation this gateway is built for — many servers, few exposed tools
-// — a caller would reach for it by default and pay for hundreds of tools it
-// was not going to use. That is the bill progressive disclosure exists to
-// avoid. The old project made the same call: its list_tools required a
-// server name, and its list-everything path was reachable only from the
-// management API.
-//
-// The bounded ways to look across servers are list_servers, which reports
-// every server with its tool count in one call, and search_tools, which
-// ranks across all of them and takes a limit.
-type listToolsOutput struct {
-	Server string        `json:"server"`
-	Tools  []ToolSummary `json:"tools"`
-}
-
-// ===== get_tool =====
-
-type getToolInput struct {
-	Server string `json:"server" jsonschema:"exact name of the MCP server, as returned by list_servers, or \"mcphub\" for this gateway's own tools"`
-	Tool   string `json:"tool" jsonschema:"exact name of the tool on that server"`
-}
-
-type getToolOutput struct {
+type getToolDetailsOutput struct {
 	Server      string `json:"server"`
-	Name        string `json:"name"`
+	Tool        string `json:"tool"`
 	Exposed     string `json:"exposed"`
 	Description string `json:"description,omitempty"`
+	Title       string `json:"title,omitempty"`
 
-	// Title is the tool's display name, when it has one distinct from its
-	// name.
-	Title string `json:"title,omitempty"`
-
-	// InputSchema is a map rather than `any` because the SDK generates
-	// this tool's output schema from these field types, and `any` becomes
-	// the JSON Schema `true`.
-	//
-	// `true` is a legal schema — the one that accepts everything — but the
-	// TypeScript MCP SDK validates each entry under "properties" as an
-	// object and rejects a boolean there. It fails the whole tools/list
-	// response, not just this field, so a single `any` here makes every
-	// tool the gateway offers invisible to any client built on that SDK.
-	InputSchema map[string]any `json:"inputSchema,omitempty"`
-
-	// There is deliberately no output schema here, though the gateway holds
-	// one for any upstream tool that declares it.
-	//
-	// It is the one field whose payoff arrives after the thing it describes:
-	// call_tool forwards the upstream result verbatim, so a caller sees the
-	// real content anyway, and nothing validates against this schema — the
-	// gateway's own call_tool declares none. Meanwhile it is not small. On a
-	// real installation one server's search tool declares 1,100 characters
-	// of output schema against 314 of input. Paying that on every get_tool
-	// to predict a shape that is about to arrive is the wrong trade.
-	//
-	// Annotations are the opposite case, which is why they are here: they
-	// are small, and they decide whether to call at all.
-
-	// Annotations are the upstream server's hints about what calling this
-	// tool does — read-only, destructive, idempotent, open-world.
-	//
-	// This is the field whose absence cost the most: a caller weighing
-	// whether a call is safe to make had nothing to weigh, while the same
-	// tool published through tools/list carried the hints in full. A tool
-	// reached through call_tool is no less in need of them.
+	// Using any here generates a boolean property schema that the
+	// TypeScript MCP SDK rejects, invalidating the entire tools/list.
+	InputSchema map[string]any       `json:"inputSchema,omitempty"`
 	Annotations *mcp.ToolAnnotations `json:"annotations,omitempty"`
 }
 
-// ===== call_tool =====
-
 type callToolInput struct {
-	// The second sentence is there because a caller that has just been
-	// told a server's name will otherwise go looking for it again. Every
-	// round trip it saves is one the caller was going to spend re-reading
-	// something it already had.
-	Server string         `json:"server" jsonschema:"exact name of the MCP server, as returned by list_servers. If a previous list_tools or search_tools result already told you the server name, use it and call straight away rather than searching again"`
-	Tool   string         `json:"tool" jsonschema:"exact name of the tool on that server, as returned by list_tools or search_tools. It does not have to be a tool that appears in this gateway's own tool list"`
-	Args   map[string]any `json:"args,omitempty" jsonschema:"arguments for the tool, matching its input schema. Omit it for a tool that takes none"`
+	Server string         `json:"server" jsonschema:"exact upstream MCP server name; reuse a known name without searching again"`
+	Tool   string         `json:"tool" jsonschema:"exact tool name on that server, including tools absent from this gateway's published tool list"`
+	Args   map[string]any `json:"args,omitempty" jsonschema:"arguments matching the tool's input schema; omit for a tool that takes none"`
 }
 
-// ===== search_tools =====
-
 type searchToolsInput struct {
-	Query string `json:"query" jsonschema:"words to look for in tool names and descriptions. Several words widen the search: describing one thing several ways is fine, and a word that matches nothing is reported rather than emptying the result"`
-	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of results, default 20"`
+	Query         string `json:"query,omitempty" jsonschema:"words to match in tool and server names and descriptions; matches any word and ranks tools matching more words higher. Supply query or server"`
+	Server        string `json:"server,omitempty" jsonschema:"exact server name to search or browse; use mcphub for this gateway's own tools"`
+	Limit         *int   `json:"limit,omitempty" jsonschema:"maximum number of results, from 1 to 20; default 5 in either schema mode"`
+	IncludeSchema bool   `json:"includeSchema,omitempty" jsonschema:"include complete input schemas and annotations in results; default false. A limit of 1 to 3 is usually enough when preparing a call"`
+	Cursor        string `json:"cursor,omitempty" jsonschema:"nextCursor from a previous result; keep the same query and server to continue"`
+}
+
+// The management API keeps SearchHit's existing shape. Schema-bearing
+// discovery results extend it only on the system tool surface.
+type searchToolHit struct {
+	SearchHit
+	Title       string               `json:"title,omitempty"`
+	InputSchema map[string]any       `json:"inputSchema,omitempty"`
+	Annotations *mcp.ToolAnnotations `json:"annotations,omitempty"`
 }
 
 type searchToolsOutput struct {
-	Query string      `json:"query"`
-	Hits  []SearchHit `json:"hits"`
-
-	// Unmatched names the query terms no tool contained. It is absent when
-	// every term landed somewhere, so its presence is the signal: without
-	// it, an empty result is indistinguishable from "this gateway has no
-	// such capability".
-	Unmatched []string `json:"unmatched,omitempty"`
+	Query      string          `json:"query,omitempty"`
+	Server     string          `json:"server,omitempty"`
+	Hits       []searchToolHit `json:"hits"`
+	NextCursor string          `json:"nextCursor,omitempty"`
+	Unmatched  []string        `json:"unmatched,omitempty"`
 }
 
-// defaultSearchLimit keeps a broad query from returning every tool in
-// the installation.
-const defaultSearchLimit = 20
-
-// ===== list_tags =====
-
-type listTagsInput struct {
-	Server string `json:"server,omitempty" jsonschema:"limit the result to one server; omit for all servers"`
-}
-
-type serverTags struct {
-	Server string            `json:"server"`
-	Tags   map[string]string `json:"tags,omitempty"`
-}
-
-type listTagsOutput struct {
-	Servers []serverTags `json:"servers"`
-}
-
-// ===== update_server_description =====
-
-type updateDescriptionInput struct {
-	Server      string `json:"server" jsonschema:"exact name of the MCP server"`
-	Description string `json:"description" jsonschema:"new description, shown when listing servers"`
-}
-
-type updateDescriptionOutput struct {
-	Server      string `json:"server"`
-	Description string `json:"description"`
-}
+const (
+	defaultSearchLimit = 5
+	maxSearchLimit     = 20
+)
 
 // RegisterSystemTools adds the gateway's own tools to an MCP server.
 func RegisterSystemTools(server *mcp.Server, ups Upstreams, cfgs Configs, own OwnTools) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: ToolListServers,
-		Description: "List the configured MCP servers with their connection state, " +
-			"description and tags. Start here to find out what is available.",
+		Description: "List configured MCP servers with their descriptions, connection state and tool/resource counts. " +
+			"Use for an overview; search_tools can find a known capability directly.",
 		Annotations: readOnly("List servers"),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ listServersInput) (*mcp.CallToolResult, listServersOutput, error) {
 		return nil, listServers(ups, cfgs), nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: ToolListTools,
-		Description: "List the tools one MCP server offers, with their descriptions. " +
-			"Use the server name exactly as returned by list_servers. The name \"" +
-			Name + "\" asks about this gateway's own tools.",
-		Annotations: readOnly("List tools on a server"),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in listToolsInput) (*mcp.CallToolResult, listToolsOutput, error) {
-		out, err := listTools(ups, cfgs, own, in.Server)
+		Name: ToolSearchTools,
+		Description: "Find upstream tools by capability, or browse one server with server alone. " +
+			"Includes tools not exposed in tools/list. Results are ranked and paginated; " +
+			"includeSchema returns everything needed to prepare a call in the same request. " +
+			"Use server=mcphub to inspect this gateway's own tools.",
+		Annotations: readOnly("Search tools"),
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchToolsInput) (*mcp.CallToolResult, searchToolsOutput, error) {
+		out, err := searchTools(ups, cfgs, own, in)
 		if err != nil {
-			return toolError(err), listToolsOutput{}, nil
+			return toolError(err), searchToolsOutput{}, nil
 		}
 		return nil, out, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: ToolGetTool,
-		Description: "Get the full input schema of one tool, which is what you need " +
-			"to build a valid call, along with its annotations. The server name \"" +
-			Name + "\" asks about this gateway's own tools.",
-		Annotations: readOnly("Get a tool's schema"),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in getToolInput) (*mcp.CallToolResult, getToolOutput, error) {
-		out, err := getTool(ups, cfgs, own, in.Server, in.Tool)
+		Name: ToolGetToolDetails,
+		Description: "Get one known tool's complete input schema and annotations. " +
+			"Use when its arguments are not yet known; search_tools with includeSchema can also return these details. " +
+			"Use server=mcphub for this gateway's own tools.",
+		Annotations: readOnly("Get tool details"),
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in getToolDetailsInput) (*mcp.CallToolResult, getToolDetailsOutput, error) {
+		out, err := getToolDetails(ups, cfgs, own, in.Server, in.Tool)
 		if err != nil {
-			return toolError(err), getToolOutput{}, nil
+			return toolError(err), getToolDetailsOutput{}, nil
 		}
 		return nil, out, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: ToolCallTool,
-		Description: "Call a tool on one of the upstream MCP servers. " +
-			"The gateway's own tools (" + joinNames(SystemToolNames) + ") are called directly, not through this one.",
+		Description: "Call an upstream tool by server and tool name, whether exposed or hidden. " +
+			"If the names and arguments are already known, call directly without discovery. " +
+			"Gateway system tools are invoked directly, not through call_tool.",
 		Annotations: &mcp.ToolAnnotations{
-			Title:          "Call a tool on a server",
-			ReadOnlyHint:   false,
-			OpenWorldHint:  boolPtr(true),
-			IdempotentHint: false,
+			Title:         "Call an upstream tool",
+			OpenWorldHint: boolPtr(true),
 		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in callToolInput) (*mcp.CallToolResult, any, error) {
 		result, err := callTool(ctx, ups, in)
@@ -320,57 +183,17 @@ func RegisterSystemTools(server *mcp.Server, ups Upstreams, cfgs Configs, own Ow
 		}
 		return result, nil, nil
 	})
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name: ToolSearchTools,
-		Description: "Search for tools across every connected server by name and " +
-			"description. Several words widen the search rather than narrowing it: " +
-			"a tool matching more of them ranks higher, and a word that matches " +
-			"nothing is reported back rather than emptying the result.",
-		Annotations: readOnly("Search tools"),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchToolsInput) (*mcp.CallToolResult, searchToolsOutput, error) {
-		return nil, searchTools(ups, cfgs, in), nil
-	})
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolListTags,
-		Description: "List the tags attached to servers, used for grouping them.",
-		Annotations: readOnly("List tags"),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in listTagsInput) (*mcp.CallToolResult, listTagsOutput, error) {
-		out, err := listTags(cfgs, in.Server)
-		if err != nil {
-			return toolError(err), listTagsOutput{}, nil
-		}
-		return nil, out, nil
-	})
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name: ToolUpdateServerDescription,
-		Description: "Change a server's description. The new text is saved to the " +
-			"configuration file and shown when listing servers.",
-		Annotations: &mcp.ToolAnnotations{
-			Title:          "Update a server's description",
-			ReadOnlyHint:   false,
-			IdempotentHint: true,
-		},
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in updateDescriptionInput) (*mcp.CallToolResult, updateDescriptionOutput, error) {
-		out, err := updateDescription(cfgs, in)
-		if err != nil {
-			return toolError(err), updateDescriptionOutput{}, nil
-		}
-		return nil, out, nil
-	})
 }
 
 func listServers(ups Upstreams, cfgs Configs) listServersOutput {
 	cfg := cfgs.Get()
 	statuses := ups.Statuses()
-
 	out := listServersOutput{Servers: make([]ServerSummary, 0, len(statuses))}
 	for _, status := range statuses {
 		summary := ServerSummary{
 			Name:          status.Name,
 			State:         string(status.State),
+			Description:   cfg.MCPServers[status.Name].Description,
 			ToolCount:     status.ToolCount,
 			ResourceCount: status.ResourceCount,
 			Error:         status.Error,
@@ -378,172 +201,54 @@ func listServers(ups Upstreams, cfgs Configs) listServersOutput {
 		if status.ServerName != status.Name {
 			summary.Title = status.ServerName
 		}
-		if server, ok := cfg.MCPServers[status.Name]; ok {
-			summary.Description = server.Description
-			summary.Tags = server.Tags
-		}
-		// Only a server that is actually up gets the invitation: telling a
-		// caller to run list_tools against a failed server sends it to an
-		// error, and for that server the state and the error are the
-		// description.
-		if summary.Description == "" && status.Connected() {
-			summary.Description = undescribedInList
-		}
 		out.Servers = append(out.Servers, summary)
 	}
 	return out
 }
 
-func listTools(ups Upstreams, cfgs Configs, own OwnTools, server string) (listToolsOutput, error) {
-	all := ups.Tools()
-	names := PublishedNames(all, cfgs.Get())
-
-	// The gateway answers about itself. A caller looking for the schema of
-	// call_tool has to name some server, and the only server it can name is
-	// this one — so this one has to be a name that works.
+func getToolDetails(ups Upstreams, cfgs Configs, own OwnTools, server, tool string) (getToolDetailsOutput, error) {
 	if server == Name {
-		return listToolsOutput{Server: Name, Tools: summarizeOwn(own)}, nil
+		if own != nil {
+			for _, candidate := range own() {
+				if candidate != nil && candidate.Name == tool {
+					return describeTool(Name, candidate, candidate.Name), nil
+				}
+			}
+		}
+		return getToolDetailsOutput{}, fmt.Errorf("%s has no tool named %q; its own tools are %s",
+			Name, tool, joinNames(SystemToolNames))
 	}
-
 	if err := requireServer(ups, server); err != nil {
-		return listToolsOutput{}, err
+		return getToolDetailsOutput{}, withSystemToolHint(err, tool)
 	}
-	return listToolsOutput{Server: server, Tools: summarize(all[server], server, names)}, nil
-}
-
-// summarizeOwn reports the gateway's own tools.
-//
-// Their exposed name is their own name: they are in tools/list under it and
-// are called by it directly. Saying so is the answer to the question that
-// brought a caller here — how do I run this — for the one set of tools
-// where the answer is not call_tool.
-func summarizeOwn(own OwnTools) []ToolSummary {
-	if own == nil {
-		return []ToolSummary{}
-	}
-	tools := own()
-	out := make([]ToolSummary, 0, len(tools))
-	for _, tool := range tools {
-		if tool == nil || tool.Name == "" {
-			continue
-		}
-		out = append(out, ToolSummary{
-			Name:        tool.Name,
-			Exposed:     tool.Name,
-			Description: tool.Description,
-		})
-	}
-	slices.SortFunc(out, func(a, b ToolSummary) int {
-		return compareStrings(a.Name, b.Name)
-	})
-	return out
-}
-
-// summarize turns one server's tools into the reported form.
-//
-// Every tool the server offers is included, exposed or not: this is how a
-// model discovers what is available, and the whole point of exposing
-// little is that discovery still reaches everything.
-func summarize(tools []*mcp.Tool, server string, names NameMap) []ToolSummary {
-	out := make([]ToolSummary, 0, len(tools))
-	for _, tool := range tools {
-		if tool == nil || tool.Name == "" {
-			continue
-		}
-		exposed, _ := names.Exposed(server, tool.Name)
-		out = append(out, ToolSummary{
-			Name:        tool.Name,
-			Exposed:     exposed,
-			Description: tool.Description,
-		})
-	}
-	slices.SortFunc(out, func(a, b ToolSummary) int {
-		return compareStrings(a.Name, b.Name)
-	})
-	return out
-}
-
-func getTool(ups Upstreams, cfgs Configs, own OwnTools, server, tool string) (getToolOutput, error) {
-	// The gateway's own tools, described the same way as anyone else's. A
-	// caller that has just been told call_tool exists needs its schema, and
-	// this is the only place it can ask for it.
-	if server == Name {
-		return describeOwnTool(own, tool)
-	}
-
 	all := ups.Tools()
-	if err := requireServer(ups, server); err != nil {
-		return getToolOutput{}, withSystemToolHint(err, tool)
-	}
-
 	for _, candidate := range all[server] {
-		if candidate == nil || candidate.Name != tool {
-			continue
+		if candidate != nil && candidate.Name == tool {
+			exposed, _ := PublishedNames(all, cfgs.Get()).Exposed(server, tool)
+			return describeTool(server, candidate, exposed), nil
 		}
-		exposed, _ := PublishedNames(all, cfgs.Get()).Exposed(server, tool)
-		return describeTool(server, candidate, exposed), nil
 	}
-	return getToolOutput{}, fmt.Errorf("server %q has no tool named %q", server, tool)
+	return getToolDetailsOutput{}, fmt.Errorf("server %q has no tool named %q", server, tool)
 }
 
-// describeOwnTool answers about one of the gateway's own tools.
-//
-// The schema is the one the server publishes, read back off it rather than
-// written out here — the same reason [Gateway.SystemTools] exists. A
-// hand-written copy would describe the Go handlers as they were on the day
-// somebody typed it.
-func describeOwnTool(own OwnTools, tool string) (getToolOutput, error) {
-	if own == nil {
-		return getToolOutput{}, fmt.Errorf("no server named %q", Name)
-	}
-	for _, candidate := range own() {
-		if candidate == nil || candidate.Name != tool {
-			continue
-		}
-		// Its own name is the name it is called by: these are in tools/list.
-		return describeTool(Name, candidate, candidate.Name), nil
-	}
-	return getToolOutput{}, fmt.Errorf("%s has no tool named %q; its own tools are %s",
-		Name, tool, joinNames(SystemToolNames))
-}
-
-// describeTool reports everything the gateway holds about one tool.
-//
-// One function for an upstream tool and for the gateway's own, because a
-// caller asking what a tool is has the same question either way — and
-// because two of these would be two places for a field to go missing from.
-func describeTool(server string, tool *mcp.Tool, exposed string) getToolOutput {
-	// The declared type says this is an object, so an upstream that
-	// published something else must not be forwarded verbatim: the SDK
-	// validates structured results against the schema it generated, and a
-	// mismatch would fail the call.
+func describeTool(server string, tool *mcp.Tool, exposed string) getToolDetailsOutput {
 	schema, ok := decodeObjectSchema(tool.InputSchema)
 	if !ok {
 		schema = emptyObjectSchema()
 	}
-
-	return getToolOutput{
-		Server:      server,
-		Name:        tool.Name,
-		Exposed:     exposed,
-		Description: tool.Description,
-		Title:       tool.Title,
-		InputSchema: schema,
-		Annotations: tool.Annotations,
+	return getToolDetailsOutput{
+		Server: server, Tool: tool.Name, Exposed: exposed,
+		Description: tool.Description, Title: tool.Title,
+		InputSchema: schema, Annotations: tool.Annotations,
 	}
 }
 
 func callTool(ctx context.Context, ups Upstreams, in callToolInput) (*mcp.CallToolResult, error) {
-	// Calling a gateway tool through this one would be a needless
-	// indirection, and asking for call_tool by name would recurse.
-	if IsSystemTool(in.Tool) {
-		return nil, fmt.Errorf("%q is one of the gateway's own tools; call it directly rather than through %s",
-			in.Tool, ToolCallTool)
-	}
 	if err := requireServer(ups, in.Server); err != nil {
-		return nil, err
+		return nil, withSystemToolHint(err, in.Tool)
 	}
-
+	// The upstream is authoritative: cached discovery metadata can lag a
+	// tools/list_changed notification, and short names can match ours.
 	var args any
 	if in.Args != nil {
 		args = in.Args
@@ -551,84 +256,95 @@ func callTool(ctx context.Context, ups Upstreams, in callToolInput) (*mcp.CallTo
 	return ups.CallTool(ctx, in.Server, in.Tool, args)
 }
 
-func searchTools(ups Upstreams, cfgs Configs, in searchToolsInput) searchToolsOutput {
-	all := ups.Tools()
-	names := PublishedNames(all, cfgs.Get())
+func searchTools(ups Upstreams, cfgs Configs, own OwnTools, in searchToolsInput) (searchToolsOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
+	in.Server = strings.TrimSpace(in.Server)
+	if in.Query == "" && in.Server == "" {
+		return searchToolsOutput{}, fmt.Errorf("provide a query or server; use list_servers for an overview")
+	}
+	limit := defaultSearchLimit
+	if in.Limit != nil {
+		limit = *in.Limit
+	}
+	if limit < 1 || limit > maxSearchLimit {
+		return searchToolsOutput{}, fmt.Errorf("limit must be between 1 and %d", maxSearchLimit)
+	}
+	if in.Server != "" && in.Server != Name {
+		if err := requireServer(ups, in.Server); err != nil {
+			return searchToolsOutput{}, err
+		}
+	}
 
-	candidates := make([]Searchable, 0, len(all))
-	for _, server := range slices.Sorted(maps.Keys(all)) {
+	cfg := cfgs.Get()
+	all := ups.Tools()
+	// Names are assigned over the complete exposed set before filtering;
+	// otherwise a collision on another server would give the wrong name.
+	names := PublishedNames(all, cfg)
+	if in.Server == Name {
+		if own == nil {
+			return searchToolsOutput{}, fmt.Errorf("no server named %q", Name)
+		}
+		all = map[string][]*mcp.Tool{Name: own()}
+	}
+	serverTitles := make(map[string]string)
+	for _, status := range ups.Statuses() {
+		serverTitles[status.Name] = status.ServerName
+	}
+	servers := []string{in.Server}
+	if in.Server == "" {
+		// Group ties in their final order before ranking; a broad query
+		// should not have to sort randomized map order on every request.
+		servers = slices.Sorted(maps.Keys(all))
+	}
+	capacity := 0
+	for _, server := range servers {
+		capacity += len(all[server])
+	}
+	candidates := make([]Searchable, 0, capacity)
+	byOrigin := make(map[Route]*mcp.Tool, capacity)
+	for _, server := range servers {
+		title, description := serverTitles[server], cfg.MCPServers[server].Description
 		for _, tool := range all[server] {
 			if tool == nil || tool.Name == "" {
 				continue
 			}
-			// A tool with no exposed name is still a search result. Search
-			// is discovery, and leaving out everything unexposed would make
-			// it useless on an installation that exposes little — which is
-			// the ordinary case.
+			origin := Route{Server: server, Tool: tool.Name}
+			if _, exists := byOrigin[origin]; exists {
+				continue
+			}
+			byOrigin[origin] = tool
 			exposed, _ := names.Exposed(server, tool.Name)
+			if in.Server == Name {
+				exposed = tool.Name
+			}
 			candidates = append(candidates, Searchable{
-				Server:      server,
-				Tool:        tool.Name,
-				Exposed:     exposed,
-				Description: tool.Description,
+				Server: server, Tool: tool.Name, Exposed: exposed, Description: tool.Description,
+				ServerTitle: title, ServerDescription: description,
 			})
 		}
 	}
-
-	limit := in.Limit
-	if limit <= 0 {
-		limit = defaultSearchLimit
+	hits := SearchTools(in.Query, candidates, 0)
+	start, nextCursor, err := searchPageCursor(in, hits, limit)
+	if err != nil {
+		return searchToolsOutput{}, err
 	}
-	return searchToolsOutput{
-		Query:     in.Query,
-		Hits:      SearchTools(in.Query, candidates, limit),
+	end := min(start+limit, len(hits))
+	out := searchToolsOutput{
+		Query: in.Query, Server: in.Server,
+		Hits: make([]searchToolHit, 0, end-start), NextCursor: nextCursor,
 		Unmatched: UnmatchedTerms(in.Query, candidates),
 	}
-}
-
-func listTags(cfgs Configs, server string) (listTagsOutput, error) {
-	cfg := cfgs.Get()
-
-	if server != "" {
-		entry, ok := cfg.MCPServers[server]
-		if !ok {
-			return listTagsOutput{}, unknownServer(server, slices.Sorted(maps.Keys(cfg.MCPServers)))
+	for _, hit := range hits[start:end] {
+		result := searchToolHit{SearchHit: hit}
+		if in.IncludeSchema {
+			detail := describeTool(hit.Server, byOrigin[Route{Server: hit.Server, Tool: hit.Tool}], hit.Exposed)
+			result.Title = detail.Title
+			result.InputSchema = detail.InputSchema
+			result.Annotations = detail.Annotations
 		}
-		return listTagsOutput{Servers: []serverTags{{Server: server, Tags: entry.Tags}}}, nil
-	}
-
-	out := listTagsOutput{Servers: []serverTags{}}
-	for _, name := range slices.Sorted(maps.Keys(cfg.MCPServers)) {
-		out.Servers = append(out.Servers, serverTags{Server: name, Tags: cfg.MCPServers[name].Tags})
+		out.Hits = append(out.Hits, result)
 	}
 	return out, nil
-}
-
-func updateDescription(cfgs Configs, in updateDescriptionInput) (updateDescriptionOutput, error) {
-	// The gateway is a name list_tools and get_tool accept, so it is a name
-	// a caller will try here too. It is not a configured server and has no
-	// description to save — say that, rather than "no server named mcphub"
-	// about the thing that just answered.
-	if in.Server == Name {
-		return updateDescriptionOutput{}, fmt.Errorf(
-			"%s is this gateway itself, not one of the servers it proxies, so it has no description to record",
-			Name)
-	}
-	if _, ok := cfgs.Get().MCPServers[in.Server]; !ok {
-		return updateDescriptionOutput{}, unknownServer(in.Server,
-			slices.Sorted(maps.Keys(cfgs.Get().MCPServers)))
-	}
-
-	if _, err := cfgs.Update(func(c *config.Config) error {
-		entry := c.MCPServers[in.Server]
-		entry.Description = in.Description
-		c.MCPServers[in.Server] = entry
-		return nil
-	}); err != nil {
-		return updateDescriptionOutput{}, fmt.Errorf("save the new description: %w", err)
-	}
-
-	return updateDescriptionOutput{Server: in.Server, Description: in.Description}, nil
 }
 
 // requireServer reports a usable error when a server is unknown or not
@@ -657,12 +373,10 @@ func requireServer(ups Upstreams, server string) error {
 
 func unknownServer(server string, known []string) error {
 	// Reached for the gateway's own name only where it genuinely is not a
-	// server: call_tool forwards to upstreams, and list_tags reads the
-	// configuration. Both are true of it, and neither is what the caller
-	// wanted to hear.
+	// server: call_tool forwards to upstreams; the gateway tools are called directly.
 	if server == Name {
 		return fmt.Errorf("%s is this gateway itself rather than one of the servers it proxies; "+
-			"its own tools are in the tool list and are called directly, and list_tools and get_tool "+
+			"its own tools are in the tool list and are called directly, and search_tools and get_tool_details "+
 			"take %q as a server name if you want to see them", Name, Name)
 	}
 	if len(known) == 0 {

@@ -545,14 +545,14 @@ func TestAGatewayToolReceivesItsArguments(t *testing.T) {
 	address, cleanup := withTestServer(t, "probe")
 	defer cleanup()
 
-	code, stdout, stderr := execute(t, "tools", "call", gateway.ToolListTools,
+	code, stdout, stderr := execute(t, "tools", "call", gateway.ToolSearchTools,
 		"--arg", "server=probe", "--address", address)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
 	}
 	if !strings.Contains(stdout, "echo") {
-		t.Errorf("%s did not report the server's tools:\n%s", gateway.ToolListTools, stdout)
+		t.Errorf("%s did not report the server's tools:\n%s", gateway.ToolSearchTools, stdout)
 	}
 }
 

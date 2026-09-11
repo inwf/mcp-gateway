@@ -120,7 +120,7 @@ func TestApplyReplacesAChangedServer(t *testing.T) {
 	}
 }
 
-// Editing a description or a tag must not tear down a working session:
+// Editing a description must not tear down a working session:
 // the user is labelling, not reconfiguring.
 func TestApplyIgnoresPresentationOnlyChanges(t *testing.T) {
 	m, _ := managerFixture(t)
@@ -130,7 +130,6 @@ func TestApplyIgnoresPresentationOnlyChanges(t *testing.T) {
 
 	server := cfg.MCPServers["alpha"]
 	server.Description = "a much better description"
-	server.Tags = map[string]string{"env": "prod"}
 	cfg.MCPServers["alpha"] = server
 
 	_, _, changed := m.Apply(cfg)

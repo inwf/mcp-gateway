@@ -135,7 +135,7 @@ func uptime(seconds int64) string {
 // offering says both numbers, because either alone misleads.
 //
 // The count on its own reads as everything available, when on an ordinary
-// installation it is the seven gateway tools and nothing else — nothing is
+// installation it is the four gateway tools and nothing else — nothing is
 // exposed unless the configuration asks for it. Saying what was left out,
 // and that it is still reachable, is what stops that reading as breakage.
 func offering(published, hidden int) string {

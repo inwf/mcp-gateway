@@ -323,14 +323,13 @@ func (m *Manager) publish(server string, kind ChangeKind) {
 // connection.
 //
 // The fields cleared here are the ones a connection never sees, so a
-// change to them must not cost a reconnect. Description and tags are
+// change to them must not cost a reconnect. Description is
 // metadata. Exposure is decided entirely on the gateway side — this
 // package does not read the allow list at all — and rebuilding the
 // connection for it would kill and respawn a child process every time
 // someone flipped one tool on.
 func sameServer(a, b config.MCPServer) bool {
 	a.Description, b.Description = "", ""
-	a.Tags, b.Tags = nil, nil
 	a.ExposedTools, b.ExposedTools = nil, nil
 	return reflect.DeepEqual(a, b)
 }

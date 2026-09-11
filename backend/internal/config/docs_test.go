@@ -140,7 +140,7 @@ var sectionHeading = regexp.MustCompile("^## `[A-Za-z]")
 // kept out of tools/list so their schemas do not fill every client's
 // context — and the reference described the behaviour it was changed away
 // from. Someone configuring from it would omit the field expecting
-// everything, get seven system tools, and go read the source.
+// everything, get only system tools, and go read the source.
 //
 // The two tests above cannot see this: the field name was present and
 // correct, and prose has no type checker. So this one holds the sentence

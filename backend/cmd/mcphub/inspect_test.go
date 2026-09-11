@@ -6,9 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcphub/internal/config"
 	"mcphub/internal/gateway"
-	"mcphub/internal/testmcp"
 )
 
 // ===== tools show =====
@@ -62,7 +60,7 @@ func TestToolsShowWorksForTheGatewaysOwnTools(t *testing.T) {
 	address, cleanup := withTestServer(t, "probe")
 	defer cleanup()
 
-	code, stdout, stderr := execute(t, "tools", "show", gateway.ToolListTools, "--address", address)
+	code, stdout, stderr := execute(t, "tools", "show", gateway.ToolSearchTools, "--address", address)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d\nstderr: %s", code, stderr)
@@ -143,112 +141,6 @@ func TestToolsShowCanPrintJSON(t *testing.T) {
 	}
 	if decoded.InputSchema == nil {
 		t.Error("the schema is missing, which is what --json is for")
-	}
-}
-
-// ===== tags list =====
-
-// withTaggedServers starts a gateway with two servers carrying tags.
-func withTaggedServers(t *testing.T) (address string, cleanup func()) {
-	t.Helper()
-
-	base, stop, done := running(t, func(cfg *config.Config) {
-		upstream, err := testmcp.ServerConfig(testmcp.ModeFull)
-		if err != nil {
-			t.Fatalf("build the upstream configuration: %v", err)
-		}
-
-		one := upstream
-		one.Tags = map[string]string{"env": "dev", "kind": "probe"}
-		two := upstream
-		two.Tags = map[string]string{"env": "dev"}
-
-		cfg.MCPServers = map[string]config.MCPServer{"one": one, "two": two}
-	})
-
-	address = hostPort(t, base)
-	waitForState(t, address, "one", "connected")
-	return address, func() { stop(); <-done }
-}
-
-// A tag belongs to a server rather than to a tool, and the same tag on
-// two servers is one filter rather than two — so the list is by tag, with
-// the servers carrying it.
-func TestTagsListGroupsServersUnderEachTag(t *testing.T) {
-	address, cleanup := withTaggedServers(t)
-	defer cleanup()
-
-	code, stdout, stderr := execute(t, "tags", "list", "--address", address)
-
-	if code != exitOK {
-		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, exitOK, stderr)
-	}
-
-	shared := rowFor(t, stdout, "env")
-	for _, want := range []string{"dev", "one", "two"} {
-		if !strings.Contains(shared, want) {
-			t.Errorf("the row for env does not contain %q: %q", want, shared)
-		}
-	}
-
-	// A tag only one server carries lists only that one.
-	only := rowFor(t, stdout, "kind")
-	if !strings.Contains(only, "one") {
-		t.Errorf("the row for kind does not name the server carrying it: %q", only)
-	}
-	if strings.Contains(only, "two") {
-		t.Errorf("the row for kind names a server that does not carry it: %q", only)
-	}
-}
-
-func TestTagsListCanNarrowToOneServer(t *testing.T) {
-	address, cleanup := withTaggedServers(t)
-	defer cleanup()
-
-	code, stdout, _ := execute(t, "tags", "list", "--server", "two", "--address", address)
-
-	if code != exitOK {
-		t.Fatalf("exit code = %d, want %d", code, exitOK)
-	}
-	if !strings.Contains(stdout, "env") {
-		t.Errorf("the tag the server carries is missing:\n%s", stdout)
-	}
-	if strings.Contains(stdout, "kind") {
-		t.Errorf("a tag the server does not carry was listed:\n%s", stdout)
-	}
-}
-
-// Reporting "no tags" for a server that does not exist would send someone
-// looking for a tag that was never the problem.
-func TestTagsListRefusesAServerThatIsNotThere(t *testing.T) {
-	address, cleanup := withTaggedServers(t)
-	defer cleanup()
-
-	code, _, stderr := execute(t, "tags", "list", "--server", "nowhere", "--address", address)
-
-	if code != exitFailure {
-		t.Errorf("exit code = %d, want %d", code, exitFailure)
-	}
-	if !strings.Contains(stderr, "nowhere") {
-		t.Errorf("the message does not name the server that was asked for:\n%s", stderr)
-	}
-	// The configured names are what someone typing from memory needs.
-	if !strings.Contains(stderr, "one") || !strings.Contains(stderr, "two") {
-		t.Errorf("the message does not say which servers exist:\n%s", stderr)
-	}
-}
-
-func TestTagsListSaysSoWhenThereAreNone(t *testing.T) {
-	address, cleanup := withTestServer(t, "probe")
-	defer cleanup()
-
-	code, stdout, _ := execute(t, "tags", "list", "--address", address)
-
-	if code != exitOK {
-		t.Fatalf("exit code = %d, want %d", code, exitOK)
-	}
-	if !strings.Contains(stdout, "no tags") {
-		t.Errorf("the output does not say that there are none:\n%s", stdout)
 	}
 }
 

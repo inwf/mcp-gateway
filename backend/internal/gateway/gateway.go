@@ -38,29 +38,17 @@ type Options struct {
 	After func(time.Duration, func())
 }
 
-// instructions is what a client is told during the handshake, before it
-// has called anything.
-//
-// It is long on purpose. A client that reads only the tool list sees the
-// gateway's seven tools and no upstream ones, and nothing in that list
-// says the upstream tools exist or how to reach them. Leaving that unsaid
-// costs a caller several turns of guessing at every session: a real one
-// re-read the same schema four times because nothing had mentioned
-// call_tool. The management CLI has printed the same explanation to
-// humans since it grew a --all flag; this is the version for the model.
-//
-// Every name in SystemToolNames has to appear here, and so does the
-// guide's URI. A test enforces both — prose has no type checker, and the
-// last version of this text drifted into naming three tools out of seven.
-const instructions = `This gateway proxies several MCP servers. Its tool list holds the gateway's own tools only; the tools of the proxied servers are reached through them.
+// instructions explains progressive discovery before the first call.
+// Tests compare its names with the registered tools and the guide URI.
+const instructions = `This gateway proxies MCP servers. Its tool list contains four system tools plus any upstream tools explicitly exposed by the operator.
 
-To find a tool: list_servers for what is behind the gateway, list_tools for what one server offers, search_tools to look across every server by name and description, get_tool for one tool's full input schema. list_tags shows how servers are grouped, and update_server_description records what a server is for once you have worked it out. Reading the resource hub://servers/{name} gives one server's whole tool list, with descriptions, in a single call.
+When you know the capability you need, use search_tools(query). To browse one server, use search_tools(server); list_servers gives an overview of configured servers and their state. Search matches tool and server names and descriptions, including hidden tools. It defaults to five results; follow nextCursor with the same query and server for more. Use includeSchema=true to prepare a call in one search, or get_tool_details(server, tool) for one known tool's full input schema and annotations.
 
-To run one: call_tool(server, tool, args). That is the only way to run a proxied tool, and most of them are deliberately kept out of the tool list to keep it short — a tool being absent from that list says nothing about whether it can be called. A proxied tool that does appear in it, under a name like "files_read", can also be called directly by that name.
+When you already know the server, tool and arguments, call_tool(server, tool, args) directly. Tools absent from tools/list are still callable. An exposed upstream tool can also be called directly by its published name.
 
-The gateway's own tools — list_servers, list_tools, get_tool, call_tool, search_tools, list_tags, update_server_description — are called directly, never through call_tool. Their own schemas come from get_tool with the server name "mcphub", which is this gateway.
+The gateway's system tools — list_servers, search_tools, get_tool_details, call_tool — are called directly. Use server="mcphub" with search_tools or get_tool_details to inspect them; call_tool only forwards to upstream servers.
 
-The resource hub://guide is the longer version of all of this.`
+The resource hub://servers/{name} describes one server and its tools. The resource hub://guide contains the full usage guide.`
 
 // Gateway is the single MCP endpoint clients connect to. It exposes the
 // gateway's own tools plus every tool of every connected upstream
@@ -397,31 +385,11 @@ func (g *Gateway) readResource(ctx context.Context, req *mcp.ReadResourceRequest
 }
 
 // serverDescription is what a client reads from hub://servers/{name}.
-//
-// The connection status is embedded rather than restated, and three things
-// the status has no business knowing are added on top: what the operator
-// wrote about this server, how it is tagged, and what it can do.
-//
-// The tool list is the point of it. Without it, understanding a server
-// with seven tools costs seven round trips through get_tool; with it, one
-// read answers "what is this for" — which is the question a caller
-// actually has at that moment.
+// Descriptions are the operator's text; missing descriptions add no prose.
 type serverDescription struct {
 	upstream.Status
-
-	// Description is never omitted. When nobody has written one, the value
-	// says so and names the tool that fixes it: a caller cannot ask for a
-	// description that is not there, but it can notice a missing one and
-	// record what it worked out.
-	Description string `json:"description"`
-
-	Tags map[string]string `json:"tags,omitempty"`
-
-	// Tools maps a tool's name to its description, both exactly as the
-	// upstream server gave them. An empty description means the server
-	// published none — worth showing as empty rather than hiding, because
-	// "this server documents nothing" is itself an answer.
-	Tools map[string]string `json:"tools,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Tools       map[string]string `json:"tools,omitempty"`
 }
 
 func (g *Gateway) describeServer(server, uri string) (*mcp.ReadResourceResult, error) {
@@ -430,12 +398,11 @@ func (g *Gateway) describeServer(server, uri string) (*mcp.ReadResourceResult, e
 			continue
 		}
 
-		described := serverDescription{Status: status, Description: undescribedInResource}
+		described := serverDescription{Status: status}
 		if entry, ok := g.opts.Configs.Get().MCPServers[server]; ok {
 			if entry.Description != "" {
 				described.Description = entry.Description
 			}
-			described.Tags = entry.Tags
 		}
 		if tools := g.opts.Upstreams.Tools()[server]; len(tools) > 0 {
 			described.Tools = make(map[string]string, len(tools))

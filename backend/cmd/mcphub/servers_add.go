@@ -32,7 +32,6 @@ type addFlags struct {
 	transport   string
 	env         []string
 	headers     []string
-	tags        []string
 	proxy       string
 	description string
 	timeout     string
@@ -78,7 +77,6 @@ func newServersAddCommand(client *clientOptions, stdout io.Writer) *cobra.Comman
 		"transport to use (default: inferred from --url or the command)")
 	f.StringArrayVar(&flags.env, "env", nil, "environment variable as KEY=VALUE; repeat for more")
 	f.StringArrayVar(&flags.headers, "header", nil, "HTTP header as NAME=VALUE; repeat for more")
-	f.StringArrayVar(&flags.tags, "tag", nil, "tag as KEY=VALUE; repeat for more")
 	f.StringVar(&flags.proxy, "proxy", "", "HTTP proxy to reach the server through")
 	f.StringVar(&flags.description, "description", "", "what this server is for")
 	f.StringVar(&flags.timeout, "timeout", "", "per-request timeout, such as 30s")
@@ -179,7 +177,6 @@ func buildServer(flags *addFlags, command string, commandArgs []string) (json.Ra
 	}{
 		{"--env", flags.env, "env"},
 		{"--header", flags.headers, "headers"},
-		{"--tag", flags.tags, "tags"},
 	} {
 		if len(pair.values) == 0 {
 			continue

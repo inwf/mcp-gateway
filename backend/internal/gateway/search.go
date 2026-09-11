@@ -33,10 +33,12 @@ type SearchHit struct {
 
 // Searchable is one candidate offered to [SearchTools].
 type Searchable struct {
-	Server      string
-	Tool        string
-	Exposed     string
-	Description string
+	Server            string
+	ServerTitle       string
+	ServerDescription string
+	Tool              string
+	Exposed           string
+	Description       string
 }
 
 // SearchTools ranks candidates against a query.
@@ -126,13 +128,16 @@ func lowerTerms(query string) []string {
 	return terms
 }
 
-// places are the three fields of a candidate a term can be found in,
+// places are the fields of a candidate a term can be found in,
 // lowered once so that a query of several terms does not lower them again
 // for each one.
 type places struct {
 	name        string
 	exposed     string
 	description string
+	server      string
+	serverTitle string
+	serverDesc  string
 }
 
 func placesIn(candidate Searchable) places {
@@ -140,6 +145,9 @@ func placesIn(candidate Searchable) places {
 		name:        strings.ToLower(candidate.Tool),
 		exposed:     strings.ToLower(candidate.Exposed),
 		description: strings.ToLower(candidate.Description),
+		server:      strings.ToLower(candidate.Server),
+		serverTitle: strings.ToLower(candidate.ServerTitle),
+		serverDesc:  strings.ToLower(candidate.ServerDescription),
 	}
 }
 
@@ -165,11 +173,10 @@ func bestPlacement(term string, where places) int {
 		return scoreNamePrefix
 	case strings.Contains(where.name, term):
 		return scoreNameContains
-	// The exposed name carries the server, so searching by server name
-	// finds that server's tools.
-	case strings.Contains(where.exposed, term):
+	// Server names must also match tools that have no exposed name.
+	case strings.Contains(where.exposed, term), strings.Contains(where.server, term):
 		return scoreNameContains
-	case strings.Contains(where.description, term):
+	case strings.Contains(where.description, term), strings.Contains(where.serverTitle, term), strings.Contains(where.serverDesc, term):
 		return scoreDescContains
 	default:
 		return 0

@@ -121,7 +121,7 @@ func TestGatewayExposesSystemAndForwardedTools(t *testing.T) {
 
 // The handshake is the only thing every client reads before it has called
 // anything, so it is the only place that can explain the shape of this
-// gateway to a caller who will otherwise see seven tools and conclude the
+// gateway to a caller who will otherwise see four tools and conclude the
 // upstream ones do not exist.
 //
 // The names are read out of the constant rather than written down here.
@@ -159,7 +159,7 @@ func TestTheHandshakeExplainsEveryGatewayTool(t *testing.T) {
 //
 // An exposed tool travels into tools/list as a whole copy of what the
 // upstream published, annotations included. An unexposed one is only ever
-// seen through get_tool, and get_tool used to report the description and the
+// seen through get_tool_details, and get_tool_details used to report the description and the
 // input schema and drop the rest. So the same tool answered two different
 // questions depending on a setting that has nothing to do with what it does:
 // readOnlyHint, which is how a caller judges whether a call is safe, was
@@ -211,7 +211,7 @@ func TestGetToolReportsAsMuchAsTheToolListDoes(t *testing.T) {
 		t.Fatalf("the exposed tool lost its annotations: %+v", forwarded.Annotations)
 	}
 
-	// Unexposed: nothing about it is in the tool list, and get_tool is the
+	// Unexposed: nothing about it is in the tool list, and get_tool_details is the
 	// only way to learn anything — so it has to be the whole thing.
 	hidden, _ := gatewayOn(t, rich(), func(o *gateway.Options) {
 		o.Configs = exposing(t, map[string][]string{"files": {}})
@@ -230,7 +230,7 @@ func TestGetToolReportsAsMuchAsTheToolListDoes(t *testing.T) {
 		Annotations  *mcp.ToolAnnotations `json:"annotations"`
 	}
 
-	structured(t, callSystemTool(t, hiddenSession, gateway.ToolGetTool,
+	structured(t, callSystemTool(t, hiddenSession, gateway.ToolGetToolDetails,
 		map[string]any{"server": "files", "tool": "read"}), &described)
 
 	if described.Exposed != "" {
@@ -265,30 +265,30 @@ func TestTheGatewayDescribesItsOwnTools(t *testing.T) {
 	session := clientOn(t, url, nil)
 
 	var listed struct {
-		Server string                `json:"server"`
-		Tools  []gateway.ToolSummary `json:"tools"`
+		Server string              `json:"server"`
+		Hits   []gateway.SearchHit `json:"hits"`
 	}
-	structured(t, callSystemTool(t, session, gateway.ToolListTools,
+	structured(t, callSystemTool(t, session, gateway.ToolSearchTools,
 		map[string]any{"server": gateway.Name}), &listed)
 
 	if listed.Server != gateway.Name {
 		t.Errorf("server = %q, want %q", listed.Server, gateway.Name)
 	}
-	if len(listed.Tools) != len(gateway.SystemToolNames) {
+	if len(listed.Hits) != len(gateway.SystemToolNames) {
 		t.Fatalf("listed %d of its own tools, want all %d: %+v",
-			len(listed.Tools), len(gateway.SystemToolNames), listed.Tools)
+			len(listed.Hits), len(gateway.SystemToolNames), listed.Hits)
 	}
-	for _, tool := range listed.Tools {
-		if !gateway.IsSystemTool(tool.Name) {
-			t.Errorf("%q is not one of the gateway's tools", tool.Name)
+	for _, tool := range listed.Hits {
+		if !gateway.IsSystemTool(tool.Tool) {
+			t.Errorf("%q is not one of the gateway's tools", tool.Tool)
 		}
 		// These are in tools/list under their own name, and that is how they
 		// are called — so that is what they are exposed as.
-		if tool.Exposed != tool.Name {
-			t.Errorf("%q is exposed as %q, want its own name", tool.Name, tool.Exposed)
+		if tool.Exposed != tool.Tool {
+			t.Errorf("%q is exposed as %q, want its own name", tool.Tool, tool.Exposed)
 		}
 		if tool.Description == "" {
-			t.Errorf("%q has no description", tool.Name)
+			t.Errorf("%q has no description", tool.Tool)
 		}
 	}
 }
@@ -314,21 +314,21 @@ func TestTheGatewaysOwnSchemaMatchesTheOneItPublishes(t *testing.T) {
 	for _, name := range gateway.SystemToolNames {
 		var described struct {
 			Server      string         `json:"server"`
-			Name        string         `json:"name"`
+			Tool        string         `json:"tool"`
 			InputSchema map[string]any `json:"inputSchema"`
 		}
-		structured(t, callSystemTool(t, session, gateway.ToolGetTool,
+		structured(t, callSystemTool(t, session, gateway.ToolGetToolDetails,
 			map[string]any{"server": gateway.Name, "tool": name}), &described)
 
-		if described.Name != name {
-			t.Errorf("get_tool(%s) named %q", name, described.Name)
+		if described.Tool != name {
+			t.Errorf("get_tool_details(%s) named %q", name, described.Tool)
 		}
 		want, ok := published[name]
 		if !ok {
 			t.Fatalf("%q is not in the published tool list", name)
 		}
 		if !sameJSON(t, described.InputSchema, want.InputSchema) {
-			t.Errorf("%s: get_tool reports a different input schema than tools/list\n get_tool:  %s\n tools/list: %s",
+			t.Errorf("%s: get_tool_details reports a different input schema than tools/list\n get_tool_details:  %s\n tools/list: %s",
 				name, mustJSON(t, described.InputSchema), mustJSON(t, want.InputSchema))
 		}
 	}
@@ -338,7 +338,7 @@ func TestAskingTheGatewayForAToolItDoesNotHave(t *testing.T) {
 	url, _ := gatewayOn(t, twoServers(), nil)
 	session := clientOn(t, url, nil)
 
-	result := callSystemTool(t, session, gateway.ToolGetTool,
+	result := callSystemTool(t, session, gateway.ToolGetToolDetails,
 		map[string]any{"server": gateway.Name, "tool": "teleport"})
 
 	if !result.IsError {
@@ -348,34 +348,6 @@ func TestAskingTheGatewayForAToolItDoesNotHave(t *testing.T) {
 	// one of them.
 	if text := resultText(result); !strings.Contains(text, gateway.ToolCallTool) {
 		t.Errorf("error %q does not name the gateway's own tools", text)
-	}
-}
-
-// It is a name list_tools and get_tool accept, so it is a name a caller
-// will try here too — and "no server named mcphub" would be a strange thing
-// to hear from mcphub.
-func TestTheGatewayCannotBeGivenADescription(t *testing.T) {
-	url, _ := gatewayOn(t, twoServers(), nil)
-	session := clientOn(t, url, nil)
-
-	result := callSystemTool(t, session, gateway.ToolUpdateServerDescription,
-		map[string]any{"server": gateway.Name, "description": "the gateway itself"})
-
-	if !result.IsError {
-		t.Fatal("the gateway accepted a description of itself")
-	}
-	text := resultText(result)
-	if strings.Contains(text, "no server named") {
-		t.Errorf("error %q denies that the gateway exists", text)
-	}
-	if !strings.Contains(text, "itself") {
-		t.Errorf("error %q does not explain what the gateway is", text)
-	}
-	// And it answers the question that was asked. The generic "mcphub is
-	// this gateway" reply talks about tools, which is not what a caller
-	// trying to record a description wanted to know.
-	if !strings.Contains(text, "description") {
-		t.Errorf("error %q never mentions the description it was asked to save", text)
 	}
 }
 
@@ -732,18 +704,18 @@ func TestAnUnexposedToolIsStillFoundAndCalled(t *testing.T) {
 		t.Fatalf("files_read is exposed although nothing was listed: %v", names)
 	}
 
-	// ...but list_tools still finds it,
-	listed := callSystemTool(t, session, gateway.ToolListTools,
+	// ...but search_tools still finds it,
+	listed := callSystemTool(t, session, gateway.ToolSearchTools,
 		map[string]any{"server": "files"})
 	if text := resultText(listed); !strings.Contains(text, "read") {
-		t.Errorf("list_tools does not report an unexposed tool: %s", text)
+		t.Errorf("search_tools does not report an unexposed tool: %s", text)
 	}
 
-	// ...get_tool still describes it,
-	described := callSystemTool(t, session, gateway.ToolGetTool,
+	// ...get_tool_details still describes it,
+	described := callSystemTool(t, session, gateway.ToolGetToolDetails,
 		map[string]any{"server": "files", "tool": "read"})
 	if described.IsError {
-		t.Errorf("get_tool refused an unexposed tool: %s", resultText(described))
+		t.Errorf("get_tool_details refused an unexposed tool: %s", resultText(described))
 	}
 
 	// ...and call_tool still calls it.
@@ -762,7 +734,7 @@ func TestAnUnexposedToolIsStillFoundAndCalled(t *testing.T) {
 //
 // Two computations used to answer "what is this tool called": the system
 // tools worked names out over every upstream tool, while Sync registered
-// only the exposed ones. Nothing compared them, so list_tools handed out
+// only the exposed ones. Nothing compared them, so search_tools handed out
 // names that did not exist. The collision case is the sharper one — an
 // unexposed tool sharing a name counted as a clash on one side and not
 // the other, so even an exposed tool came back under the wrong name.
@@ -794,17 +766,17 @@ func TestReportedExposedNamesAreNamesThatWereRegistered(t *testing.T) {
 		{"files", "read"}, {"files", "write"}, {"notes", "read"},
 	} {
 		var out struct {
-			Tools []gateway.ToolSummary `json:"tools"`
+			Hits []gateway.SearchHit `json:"hits"`
 		}
-		structured(t, callSystemTool(t, session, gateway.ToolListTools,
+		structured(t, callSystemTool(t, session, gateway.ToolSearchTools,
 			map[string]any{"server": probe.server}), &out)
 
-		for _, summary := range out.Tools {
-			if summary.Name != probe.tool || summary.Exposed == "" {
+		for _, summary := range out.Hits {
+			if summary.Tool != probe.tool || summary.Exposed == "" {
 				continue
 			}
 			if !slices.Contains(registered, summary.Exposed) {
-				t.Errorf("list_tools offers %s/%s as %q, which is not registered; registered = %v",
+				t.Errorf("search_tools offers %s/%s as %q, which is not registered; registered = %v",
 					probe.server, probe.tool, summary.Exposed, registered)
 			}
 		}
@@ -901,7 +873,7 @@ func TestReadingAServerResource(t *testing.T) {
 }
 
 // The tool list is why this resource is worth reading: without it,
-// understanding a server with seven tools costs seven calls to get_tool.
+// understanding a server with seven tools costs seven calls to get_tool_details.
 // One read has to answer "what can this server do".
 func TestAServerResourceListsWhatTheServerCanDo(t *testing.T) {
 	url, _ := gatewayOn(t, twoServers(), nil)
@@ -917,11 +889,8 @@ func TestAServerResourceListsWhatTheServerCanDo(t *testing.T) {
 		t.Errorf("tools = %v, want %v", described.Tools, want)
 	}
 
-	// This configuration records no description, and a caller can do
-	// something about that — so the field says so and names the tool that
-	// fixes it, rather than being absent.
-	if !strings.Contains(described.Description, "update_server_description") {
-		t.Errorf("description %q does not say how to record one", described.Description)
+	if described.Description != "" {
+		t.Errorf("unrecorded description = %q, want none", described.Description)
 	}
 }
 
@@ -935,9 +904,6 @@ func TestAServerResourceCarriesTheRecordedDescription(t *testing.T) {
 
 	if described.Description != "local filesystem" {
 		t.Errorf("description = %q, want the one from the configuration", described.Description)
-	}
-	if described.Tags["env"] != "dev" {
-		t.Errorf("tags = %v, want the ones from the configuration", described.Tags)
 	}
 	// The connection status is still there; the description is added to it,
 	// not substituted for it.
@@ -953,7 +919,6 @@ type serverResource struct {
 	Name        string            `json:"name"`
 	State       upstream.State    `json:"state"`
 	Description string            `json:"description"`
-	Tags        map[string]string `json:"tags"`
 	Tools       map[string]string `json:"tools"`
 }
 

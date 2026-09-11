@@ -114,8 +114,7 @@ func gatewayFixture(t *testing.T, ups gateway.Upstreams, cfgs gateway.Configs) *
 }
 
 // configFixture builds a real configuration manager backed by a
-// temporary file, so that tools which write configuration are tested
-// against the thing that actually persists it.
+// temporary file, so reads use the same defaults and cloning as production.
 func configFixture(t *testing.T, servers map[string]config.MCPServer) *config.Manager {
 	t.Helper()
 
@@ -247,7 +246,6 @@ func twoServersConfig(t *testing.T) *config.Manager {
 		"files": {
 			Transport: config.TransportStdio, Command: "npx", Enabled: true,
 			Timeout: time.Minute, Description: "local filesystem",
-			Tags:         map[string]string{"env": "dev", "kind": "fs"},
 			ExposedTools: []string{"read"},
 		},
 		"broken": {
@@ -338,9 +336,6 @@ func TestListServers(t *testing.T) {
 	if files.Description != "local filesystem" {
 		t.Errorf("files description = %q, want it from the configuration", files.Description)
 	}
-	if files.Tags["env"] != "dev" {
-		t.Errorf("files tags = %v, want env=dev", files.Tags)
-	}
 	if files.ToolCount != 2 {
 		t.Errorf("files toolCount = %d, want 2", files.ToolCount)
 	}
@@ -354,8 +349,7 @@ func TestListServers(t *testing.T) {
 	if broken.Error == "" {
 		t.Error("broken carries no error message")
 	}
-	// And it is not invited to run list_tools, which would only fail: for a
-	// server that is down, the state and the error are the description.
+	// A missing description stays absent even for a failed server.
 	if broken.Description != "" {
 		t.Errorf("broken description = %q, want none for a server that is down", broken.Description)
 	}
@@ -409,64 +403,58 @@ func TestAServerThatAgreesWithItsConfiguredNameHasNoTitle(t *testing.T) {
 	}
 }
 
-// Nobody has written a description for most servers, and a caller can fix
-// that — so the field says how instead of being empty.
-func TestAnUndescribedServerSaysHowToDescribeIt(t *testing.T) {
+func TestAnUndescribedServerDoesNotRepeatInstructions(t *testing.T) {
 	session := gatewayFixture(t, twoServers(), exposingEverything(t, twoServers()))
-
 	var out struct {
-		Servers []gateway.ServerSummary `json:"servers"`
+		Servers []map[string]any `json:"servers"`
 	}
 	structured(t, callSystemTool(t, session, gateway.ToolListServers, nil), &out)
-
 	for _, server := range out.Servers {
-		if server.Name != "files" {
-			continue
+		if _, exists := server["description"]; exists {
+			t.Errorf("an undescribed server carries a description: %v", server)
 		}
-		for _, want := range []string{gateway.ToolListTools, gateway.ToolUpdateServerDescription} {
-			if !strings.Contains(server.Description, want) {
-				t.Errorf("description %q does not mention %s", server.Description, want)
-			}
+		if _, exists := server["tags"]; exists {
+			t.Errorf("server tags are still returned: %v", server)
 		}
 	}
 }
 
-func TestListTools(t *testing.T) {
+func TestBrowsingTools(t *testing.T) {
 	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
 
 	var out struct {
-		Server string                `json:"server"`
-		Tools  []gateway.ToolSummary `json:"tools"`
+		Server string              `json:"server"`
+		Hits   []gateway.SearchHit `json:"hits"`
 	}
-	structured(t, callSystemTool(t, session, gateway.ToolListTools,
+	structured(t, callSystemTool(t, session, gateway.ToolSearchTools,
 		map[string]any{"server": "files"}), &out)
 
 	if out.Server != "files" {
 		t.Errorf("server = %q, want files", out.Server)
 	}
-	if len(out.Tools) != 2 {
-		t.Fatalf("listed %d tools, want 2: %+v", len(out.Tools), out.Tools)
+	if len(out.Hits) != 2 {
+		t.Fatalf("listed %d tools, want 2: %+v", len(out.Hits), out.Hits)
 	}
 	// Sorted, so a repeated call reads the same.
-	if out.Tools[0].Name != "read" || out.Tools[1].Name != "write" {
-		t.Errorf("tools = %+v, want read then write", out.Tools)
+	if out.Hits[0].Tool != "read" || out.Hits[1].Tool != "write" {
+		t.Errorf("tools = %+v, want read then write", out.Hits)
 	}
 	// The exposed name is what a client would call directly.
-	if out.Tools[0].Exposed != "files_read" {
-		t.Errorf("exposed = %q, want files_read", out.Tools[0].Exposed)
+	if out.Hits[0].Exposed != "files_read" {
+		t.Errorf("exposed = %q, want files_read", out.Hits[0].Exposed)
 	}
 	// "write" is not exposed, so there is no name to call it by. The empty
 	// field is the signal to reach it through call_tool instead — and it
 	// must be empty rather than a name that was never registered.
-	if out.Tools[1].Exposed != "" {
-		t.Errorf("exposed = %q for an unexposed tool, want no name", out.Tools[1].Exposed)
+	if out.Hits[1].Exposed != "" {
+		t.Errorf("exposed = %q for an unexposed tool, want no name", out.Hits[1].Exposed)
 	}
 }
 
-func TestListToolsOnAnUnknownServer(t *testing.T) {
+func TestBrowsingToolsOnAnUnknownServer(t *testing.T) {
 	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
 
-	result := callSystemTool(t, session, gateway.ToolListTools,
+	result := callSystemTool(t, session, gateway.ToolSearchTools,
 		map[string]any{"server": "ghost"})
 
 	if !result.IsError {
@@ -484,10 +472,10 @@ func TestListToolsOnAnUnknownServer(t *testing.T) {
 
 // A configured but disconnected server needs a different answer from one
 // that does not exist: the fix is to connect it, not to rename it.
-func TestListToolsOnADisconnectedServer(t *testing.T) {
+func TestBrowsingToolsOnADisconnectedServer(t *testing.T) {
 	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
 
-	result := callSystemTool(t, session, gateway.ToolListTools,
+	result := callSystemTool(t, session, gateway.ToolSearchTools,
 		map[string]any{"server": "broken"})
 
 	if !result.IsError {
@@ -503,16 +491,16 @@ func TestGetTool(t *testing.T) {
 
 	var out struct {
 		Server      string `json:"server"`
-		Name        string `json:"name"`
+		Tool        string `json:"tool"`
 		Exposed     string `json:"exposed"`
 		Description string `json:"description"`
 		InputSchema any    `json:"inputSchema"`
 	}
-	structured(t, callSystemTool(t, session, gateway.ToolGetTool,
+	structured(t, callSystemTool(t, session, gateway.ToolGetToolDetails,
 		map[string]any{"server": "files", "tool": "read"}), &out)
 
-	if out.Name != "read" || out.Server != "files" {
-		t.Errorf("got %s/%s, want files/read", out.Server, out.Name)
+	if out.Tool != "read" || out.Server != "files" {
+		t.Errorf("got %s/%s, want files/read", out.Server, out.Tool)
 	}
 	if out.Exposed != "files_read" {
 		t.Errorf("exposed = %q, want files_read", out.Exposed)
@@ -533,7 +521,7 @@ func TestGetTool(t *testing.T) {
 func TestGetToolThatDoesNotExist(t *testing.T) {
 	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
 
-	result := callSystemTool(t, session, gateway.ToolGetTool,
+	result := callSystemTool(t, session, gateway.ToolGetToolDetails,
 		map[string]any{"server": "files", "tool": "teleport"})
 
 	if !result.IsError {
@@ -554,7 +542,7 @@ func TestGetToolThatDoesNotExist(t *testing.T) {
 func TestAskingSomeServerForAGatewayToolExplainsItself(t *testing.T) {
 	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
 
-	result := callSystemTool(t, session, gateway.ToolGetTool,
+	result := callSystemTool(t, session, gateway.ToolGetToolDetails,
 		map[string]any{"server": "my-mcp-gateway", "tool": gateway.ToolCallTool})
 
 	if !result.IsError {
@@ -580,7 +568,7 @@ func TestAnUpstreamToolMayShareAGatewayToolName(t *testing.T) {
 		&mcp.Tool{Name: gateway.ToolListServers, Description: "list the files server's own servers"})
 	session := gatewayFixture(t, ups, twoServersConfig(t))
 
-	result := callSystemTool(t, session, gateway.ToolGetTool,
+	result := callSystemTool(t, session, gateway.ToolGetToolDetails,
 		map[string]any{"server": "files", "tool": gateway.ToolListServers})
 
 	if result.IsError {
@@ -641,7 +629,7 @@ func TestCallToolRefusesTheGatewaysOwnTools(t *testing.T) {
 
 	for _, name := range gateway.SystemToolNames {
 		result := callSystemTool(t, session, gateway.ToolCallTool, map[string]any{
-			"server": "files",
+			"server": gateway.Name,
 			"tool":   name,
 		})
 
@@ -742,122 +730,6 @@ func TestSearchToolsFindsNothing(t *testing.T) {
 	}
 }
 
-func TestListTagsForEveryServer(t *testing.T) {
-	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
-
-	var out struct {
-		Servers []struct {
-			Server string            `json:"server"`
-			Tags   map[string]string `json:"tags"`
-		} `json:"servers"`
-	}
-	structured(t, callSystemTool(t, session, gateway.ToolListTags, nil), &out)
-
-	if len(out.Servers) != 2 {
-		t.Fatalf("listed %d servers, want 2: %+v", len(out.Servers), out.Servers)
-	}
-	// Sorted, so the answer is stable.
-	if out.Servers[0].Server != "broken" || out.Servers[1].Server != "files" {
-		t.Errorf("servers = %+v, want them ordered by name", out.Servers)
-	}
-	if out.Servers[1].Tags["kind"] != "fs" {
-		t.Errorf("files tags = %v, want kind=fs", out.Servers[1].Tags)
-	}
-}
-
-func TestListTagsForOneServer(t *testing.T) {
-	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
-
-	var out struct {
-		Servers []struct {
-			Server string            `json:"server"`
-			Tags   map[string]string `json:"tags"`
-		} `json:"servers"`
-	}
-	structured(t, callSystemTool(t, session, gateway.ToolListTags,
-		map[string]any{"server": "files"}), &out)
-
-	if len(out.Servers) != 1 || out.Servers[0].Server != "files" {
-		t.Fatalf("got %+v, want only files", out.Servers)
-	}
-}
-
-func TestListTagsForAnUnknownServer(t *testing.T) {
-	session := gatewayFixture(t, twoServers(), twoServersConfig(t))
-
-	result := callSystemTool(t, session, gateway.ToolListTags,
-		map[string]any{"server": "ghost"})
-
-	if !result.IsError {
-		t.Fatal("listing tags for a server that does not exist succeeded")
-	}
-}
-
-// The description is written to the configuration file, so the change
-// has to survive a reload rather than only living in memory.
-func TestUpdateServerDescriptionPersists(t *testing.T) {
-	cfgs := twoServersConfig(t)
-	session := gatewayFixture(t, twoServers(), cfgs)
-
-	var out struct {
-		Server      string `json:"server"`
-		Description string `json:"description"`
-	}
-	structured(t, callSystemTool(t, session, gateway.ToolUpdateServerDescription,
-		map[string]any{"server": "files", "description": "the good filesystem"}), &out)
-
-	if out.Description != "the good filesystem" {
-		t.Errorf("returned description = %q", out.Description)
-	}
-	if got := cfgs.Get().MCPServers["files"].Description; got != "the good filesystem" {
-		t.Errorf("in-memory description = %q, want the new text", got)
-	}
-
-	reloaded, err := config.Load(cfgs.Path())
-	if err != nil {
-		t.Fatalf("reload the configuration: %v", err)
-	}
-	if got := reloaded.MCPServers["files"].Description; got != "the good filesystem" {
-		t.Errorf("persisted description = %q, want the new text", got)
-	}
-}
-
-// Changing a description must not disturb anything else about the server.
-func TestUpdateServerDescriptionLeavesTheRestAlone(t *testing.T) {
-	cfgs := twoServersConfig(t)
-	before := cfgs.Get().MCPServers["files"]
-	session := gatewayFixture(t, twoServers(), cfgs)
-
-	callSystemTool(t, session, gateway.ToolUpdateServerDescription,
-		map[string]any{"server": "files", "description": "new text"})
-
-	after := cfgs.Get().MCPServers["files"]
-	if after.Command != before.Command || after.Transport != before.Transport {
-		t.Errorf("command or transport changed: %+v then %+v", before, after)
-	}
-	if after.Timeout != before.Timeout {
-		t.Errorf("timeout changed from %v to %v", before.Timeout, after.Timeout)
-	}
-	if len(after.Tags) != len(before.Tags) {
-		t.Errorf("tags changed from %v to %v", before.Tags, after.Tags)
-	}
-}
-
-func TestUpdateDescriptionOfAnUnknownServer(t *testing.T) {
-	cfgs := twoServersConfig(t)
-	session := gatewayFixture(t, twoServers(), cfgs)
-
-	result := callSystemTool(t, session, gateway.ToolUpdateServerDescription,
-		map[string]any{"server": "ghost", "description": "nope"})
-
-	if !result.IsError {
-		t.Fatal("updating a server that does not exist succeeded")
-	}
-	if _, appeared := cfgs.Get().MCPServers["ghost"]; appeared {
-		t.Error("the failed update created the server")
-	}
-}
-
 func TestIsSystemTool(t *testing.T) {
 	for _, name := range gateway.SystemToolNames {
 		if !gateway.IsSystemTool(name) {
@@ -894,7 +766,7 @@ func TestSystemToolsWithNoServers(t *testing.T) {
 		t.Errorf("search returned %+v, want nothing", hits.Hits)
 	}
 
-	result := callSystemTool(t, session, gateway.ToolListTools, map[string]any{"server": "any"})
+	result := callSystemTool(t, session, gateway.ToolSearchTools, map[string]any{"server": "any"})
 	if !result.IsError {
 		t.Error("listing tools with no servers configured succeeded")
 	}

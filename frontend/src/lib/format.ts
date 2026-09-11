@@ -75,13 +75,6 @@ export function uptime(seconds: number): string {
   return humanDuration(seconds);
 }
 
-/** Tags are a map on the wire; a list of `key=value` is what reads
- *  well in a cell or a chip row. */
-export function tagPairs(tags: Record<string, string> | undefined): Array<[string, string]> {
-  if (!tags) return [];
-  return Object.entries(tags).sort(([a], [b]) => a.localeCompare(b));
-}
-
 /** Shortens a value that would otherwise stretch a column: a long
  *  command line, a session id. The middle goes, because both ends
  *  carry more information than the middle does. */
