@@ -36,6 +36,9 @@
   background: transparent;
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
 }
 
 .row:last-child {
@@ -47,6 +50,9 @@
 .rowOn {
   border-left-color: var(--accent);
   background: var(--accent-faint);
+}
+.rowOn:hover {
+  background: var(--accent-dim);
 }
 .itemText {
   display: grid;

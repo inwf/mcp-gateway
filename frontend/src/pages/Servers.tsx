@@ -29,6 +29,8 @@ import { ServerForm } from '@/components/ServerForm';
 import { ImportServers } from '@/components/ImportServers';
 import { ellipsize, endpointOf, tagPairs } from '@/lib/format';
 import { cx } from '@/lib/cx';
+import { stagger } from '@/lib/motion';
+import motion from '@/styles/motion.module.css';
 import styles from './Servers.module.css';
 
 const FILTERS: Array<'all' | ServerState> = [
@@ -309,7 +311,7 @@ export default function Servers() {
             <button
               key={pair}
               type="button"
-              className={styles.activeTag}
+              className={cx(styles.activeTag, motion.enter)}
               onClick={() => toggleTag(pair)}
               aria-label={t('servers.removeTag', { tag: pair })}
             >
@@ -354,6 +356,8 @@ export default function Servers() {
             dataSource={shown}
             columns={columns}
             rowKey="name"
+            rowClassName={cx(motion.fade)}
+            onRow={(_, index) => ({ style: stagger(index ?? 0) })}
             pagination={false}
             size="middle"
             scroll={{ x: 980 }}

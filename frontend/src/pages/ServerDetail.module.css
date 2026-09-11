@@ -135,6 +135,7 @@
   cursor: pointer;
   transition:
     background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
     color var(--fast) var(--ease);
 }
 

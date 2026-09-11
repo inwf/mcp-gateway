@@ -20,6 +20,8 @@ import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
 import { clockTime, endpointOf, fullTime, uptime } from '@/lib/format';
 import { cx } from '@/lib/cx';
+import { stagger } from '@/lib/motion';
+import motion from '@/styles/motion.module.css';
 import styles from './Overview.module.css';
 
 const TONE: Partial<Record<EventKind, string | undefined>> = {
@@ -58,13 +60,19 @@ function Stats() {
       <StatCard
         label={t('overview.connected')}
         value={servers.connected}
+        index={1}
         note={
           servers.failed > 0 ? t('overview.failureCount', { count: servers.failed }) : undefined
         }
         noteTone={servers.failed > 0 ? 'danger' : 'plain'}
       />
-      <StatCard label={t('overview.tools')} value={tools} note={t('overview.toolsHint')} />
-      <StatCard label={t('overview.sessions')} value={sessions} note={sessionMode} />
+      <StatCard
+        label={t('overview.tools')}
+        value={tools}
+        index={2}
+        note={t('overview.toolsHint')}
+      />
+      <StatCard label={t('overview.sessions')} value={sessions} index={3} note={sessionMode} />
     </dl>
   );
 }
@@ -88,7 +96,7 @@ function Activity() {
       ) : (
         <ol className={styles.events}>
           {events.slice(0, 8).map((event) => (
-            <li key={event.id} className={styles.event}>
+            <li key={event.id} className={cx(styles.event, motion.slide)}>
               <span className={cx(styles.eventDot, TONE[event.kind])} aria-hidden="true" />
               <div className={styles.eventText}>
                 <span>{t(`event.${event.kind}`)}</span>
@@ -154,11 +162,12 @@ function Servers() {
             <span>{t('servers.tools')}</span>
             <span>{t('servers.status')}</span>
           </div>
-          {shown.map((server) => (
+          {shown.map((server, index) => (
             <Link
               key={server.name}
               to={`/servers/${encodeURIComponent(server.name)}/overview`}
-              className={styles.serverRow}
+              className={cx(styles.serverRow, motion.fade)}
+              style={stagger(index)}
             >
               <span className={styles.serverInfo}>
                 <span className={styles.serverIcon} aria-hidden="true">

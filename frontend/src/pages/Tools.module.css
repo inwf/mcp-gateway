@@ -32,11 +32,23 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
+  transition:
+    border-color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.card:hover {
+  border-color: var(--line-strong);
+}
+
+.card:focus-within {
+  border-color: var(--line-accent);
 }
 
 .cardOff {
   background: var(--sunken);
 }
+
 .head {
   display: flex;
   align-items: baseline;
@@ -122,6 +134,9 @@
 }
 .row:last-child {
   border-bottom: 0;
+}
+.row {
+  transition: background-color var(--fast) var(--ease);
 }
 .row:hover {
   background: var(--lift);

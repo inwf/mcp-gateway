@@ -29,6 +29,8 @@ import { ServerForm } from '@/components/ServerForm';
 import { ToolCallDialog } from '@/components/ToolCallDialog';
 import { endpointOf, fullTime, relative, tagPairs } from '@/lib/format';
 import { cx } from '@/lib/cx';
+import { stagger } from '@/lib/motion';
+import motion from '@/styles/motion.module.css';
 import styles from './ServerDetail.module.css';
 
 const TABS = ['overview', 'tools', 'resources', 'logs'] as const;
@@ -180,14 +182,20 @@ function ToolsTab({ server }: { server: ServerView }) {
         flush
         className={styles.toolList}
       >
-        {tools.data.map((tool) => (
+        {tools.data.map((tool, index) => (
           <div
             key={tool.name}
-            className={cx(styles.toolRow, tool.name === active?.name && styles.toolOn)}
+            className={cx(
+              styles.toolRow,
+              motion.fade,
+              tool.name === active?.name && styles.toolOn,
+            )}
+            style={stagger(index)}
           >
             <button
               type="button"
               className={styles.toolPick}
+              aria-pressed={tool.name === active?.name}
               onClick={() => setSelected(tool.name)}
             >
               <span className={styles.toolRowName}>{tool.name}</span>
@@ -217,23 +225,25 @@ function ToolsTab({ server }: { server: ServerView }) {
 
       {active ? (
         <Panel title={t('tools.schema')}>
-          <div className={styles.toolHead}>
-            <h3 className={styles.toolName}>{active.title ?? active.name}</h3>
-            <span style={{ flex: 1 }} />
-            <Button
-              type="primary"
-              icon={<ThunderboltOutlined aria-hidden />}
-              onClick={() => setCalling(active)}
-            >
-              {t('tools.call')}
-            </Button>
+          <div key={active.name} className={motion.fade}>
+            <div className={styles.toolHead}>
+              <h3 className={styles.toolName}>{active.title ?? active.name}</h3>
+              <span style={{ flex: 1 }} />
+              <Button
+                type="primary"
+                icon={<ThunderboltOutlined aria-hidden />}
+                onClick={() => setCalling(active)}
+              >
+                {t('tools.call')}
+              </Button>
+            </div>
+            {active.description ? (
+              <p className={styles.toolDescription}>{active.description}</p>
+            ) : null}
+            <pre className={styles.schema}>
+              {JSON.stringify(active.inputSchema ?? {}, null, 2)}
+            </pre>
           </div>
-          {active.description ? (
-            <p className={styles.toolDescription}>{active.description}</p>
-          ) : null}
-          <pre className={styles.schema}>
-            {JSON.stringify(active.inputSchema ?? {}, null, 2)}
-          </pre>
         </Panel>
       ) : null}
 
@@ -302,7 +312,14 @@ function ResourcesTab({ server }: { server: ServerView }) {
 
   return (
     <Panel title={t('server.resources')} count={resources.data.length} flush>
-      <Table dataSource={resources.data} columns={columns} rowKey="uri" pagination={false} />
+      <Table
+        dataSource={resources.data}
+        columns={columns}
+        rowKey="uri"
+        rowClassName={cx(motion.fade)}
+        onRow={(_, index) => ({ style: stagger(index ?? 0) })}
+        pagination={false}
+      />
     </Panel>
   );
 }

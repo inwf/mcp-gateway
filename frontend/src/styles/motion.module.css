@@ -1,0 +1,47 @@
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Fill the staggered delay, then release the transform after entry so
+   ordinary content does not keep a stacking context of its own. */
+@media (prefers-reduced-motion: no-preference) {
+  .enter {
+    animation: rise var(--enter) var(--ease-enter) backwards;
+  }
+
+  /* Dense lists fade in place to keep the scrollable area steady. */
+  .fade {
+    animation: fade var(--slow) var(--ease-enter) backwards;
+  }
+
+  .slide {
+    animation: slide var(--enter) var(--ease-enter) backwards;
+  }
+}

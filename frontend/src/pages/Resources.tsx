@@ -14,24 +14,29 @@ import { ErrorNotice } from '@/components/ErrorNotice';
 import { Nothing } from '@/components/Nothing';
 import { IconButton } from '@/components/IconButton';
 import { cx } from '@/lib/cx';
+import { stagger } from '@/lib/motion';
+import motion from '@/styles/motion.module.css';
 import styles from './Resources.module.css';
 
 /** Renders one piece of a resource. Text is the common case; anything
  *  else is shown as it arrived rather than hidden, because a server is
  *  free to return a type this UI has not been taught. */
 function Content({ block }: { block: ContentBlock }) {
-  if (typeof block.text === 'string') return <pre className={styles.content}>{block.text}</pre>;
+  if (typeof block.text === 'string')
+    return <pre className={cx(styles.content, motion.fade)}>{block.text}</pre>;
 
   if (typeof block.blob === 'string' && block.mimeType?.startsWith('image/')) {
     return (
       <img
-        className={styles.image}
+        className={cx(styles.image, motion.fade)}
         src={`data:${block.mimeType};base64,${block.blob}`}
         alt=""
       />
     );
   }
-  return <pre className={styles.content}>{JSON.stringify(block, null, 2)}</pre>;
+  return (
+    <pre className={cx(styles.content, motion.fade)}>{JSON.stringify(block, null, 2)}</pre>
+  );
 }
 
 function Viewer({ resource }: { resource: AggregatedResource }) {
@@ -65,7 +70,7 @@ function Viewer({ resource }: { resource: AggregatedResource }) {
         />
       }
     >
-      <div className={styles.facts}>
+      <div className={cx(styles.facts, motion.fade)}>
         <span className={styles.resourceUri}>{resource.uri}</span>
         <span>{resource.server}</span>
         <span>{resource.mimeType ?? '—'}</span>
@@ -200,7 +205,7 @@ export default function Resources() {
           {shown.length === 0 ? (
             <Nothing title={t('common.noMatches')} />
           ) : (
-            shown.map((resource) => (
+            shown.map((resource, index) => (
               <button
                 key={`${resource.server}/${resource.uri}`}
                 type="button"
@@ -209,10 +214,12 @@ export default function Resources() {
                 }
                 className={cx(
                   styles.row,
+                  motion.fade,
                   resource.uri === selected?.uri &&
                     resource.server === selected?.server &&
                     styles.rowOn,
                 )}
+                style={stagger(index)}
                 onClick={() => select(resource)}
               >
                 <span className={styles.itemText}>

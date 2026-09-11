@@ -16,6 +16,8 @@ import { useExposure } from '@/hooks/use-exposure';
 import { useToolLayoutStore, type ToolLayout } from '@/stores/tool-layout';
 import { SYSTEM_GROUP, useToolCollapseStore } from '@/stores/tool-collapse';
 import { cx } from '@/lib/cx';
+import { stagger } from '@/lib/motion';
+import motion from '@/styles/motion.module.css';
 import styles from './Tools.module.css';
 
 /**
@@ -153,10 +155,12 @@ function ExposeSwitch({ tool, view }: { tool: AggregatedTool; view: ServerView }
 
 function ToolCard({
   tool,
+  index,
   view,
   onCall,
 }: {
   tool: AggregatedTool;
+  index: number;
   /** The server this tool belongs to, absent for the gateway's own. */
   view?: ServerView | undefined;
   onCall: () => void;
@@ -171,7 +175,10 @@ function ToolCard({
   const on = tool.exposed !== '';
 
   return (
-    <div className={cx(styles.card, !on && tool.server !== '' && styles.cardOff)}>
+    <div
+      className={cx(styles.card, motion.enter, !on && tool.server !== '' && styles.cardOff)}
+      style={stagger(index)}
+    >
       <div className={styles.head}>
         {/* The name a client calls, where there is one. An unexposed
               tool has none, so its own name is the headline instead —
@@ -215,10 +222,12 @@ function ToolCard({
  */
 function ToolRow({
   tool,
+  index,
   view,
   onCall,
 }: {
   tool: AggregatedTool;
+  index: number;
   view?: ServerView | undefined;
   onCall: () => void;
 }) {
@@ -228,7 +237,11 @@ function ToolRow({
   const renamed = tool.server !== '' && on && !tool.exposed.endsWith(tool.tool);
 
   return (
-    <div role="listitem" className={cx(styles.row, !on && tool.server !== '' && styles.rowOff)}>
+    <div
+      role="listitem"
+      className={cx(styles.row, motion.fade, !on && tool.server !== '' && styles.rowOff)}
+      style={stagger(index)}
+    >
       <span className={styles.rowName}>{tool.exposed || tool.tool}</span>
 
       {/* The provenance column. A gateway tool has no server; an unexposed
@@ -288,10 +301,11 @@ function ToolGroup({
           <span>{t('servers.actions')}</span>
         </div>
         <div role="list">
-          {tools.map((tool) => (
+          {tools.map((tool, index) => (
             <ToolRow
               key={`${tool.server}/${tool.tool}`}
               tool={tool}
+              index={index}
               view={view}
               onCall={() => onCall(tool)}
             />
@@ -303,10 +317,11 @@ function ToolGroup({
 
   return (
     <div className={styles.grid}>
-      {tools.map((tool) => (
+      {tools.map((tool, index) => (
         <ToolCard
           key={`${tool.server}/${tool.tool}`}
           tool={tool}
+          index={index}
           view={view}
           onCall={() => onCall(tool)}
         />

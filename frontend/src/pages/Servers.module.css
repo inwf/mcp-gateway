@@ -34,6 +34,10 @@
   font-size: var(--text-xs);
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
 .filter:hover {
@@ -149,6 +153,18 @@
   border-color: var(--line-accent);
   background: var(--accent-dim);
   color: var(--accent);
+}
+
+.tag,
+.activeTag {
+  transition:
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.activeTag:hover {
+  background: var(--accent-faint);
 }
 .actions {
   display: flex;
