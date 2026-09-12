@@ -283,21 +283,3 @@ data/
 只想换配置文件而不换数据目录：`--config /path/to/config.yaml`。
 
 想确认实际用了哪些路径：`mcphub check`。
-
-## 旧版标签配置迁移
-
-网关不再保存服务器级标签，也不再提供标签筛选。旧配置保留
-`mcpServers.<名字>.tags` 时，严格解析会指出未知字段和位置。
-
-1. 备份当前配置文件（路径可在设置页面或启动时的 `--config`、`--data-dir` 参数中确认）。
-2. 手动删除每个服务器定义直属的 `tags` 字段及其值。
-3. 运行 `mcphub config validate`；自定义路径可用 `mcphub --config /路径/config.yaml config validate`。
-4. 验证通过后启动新版，MCP 客户端重新连接或刷新工具列表。
-
-仅删除 mcphub 的服务器元数据。不要全局替换 `tags`：上游工具 schema、调用参数、
-返回结果、环境变量及请求头中的同名字段都可能是业务数据，网关会继续透传。
-已有配置不会被自动迁移或重写。服务器 `description` 仍可通过 Web 或配置编辑。
-
-旧 CLI 标签命令及 `servers add --tag` 已删除；只有原本支持标签筛选的
-`GET /api/tools` 与 `GET /api/resources` 会拒绝旧 `tag` 参数（包括空值），
-不会悄悄返回未筛选的全部结果。

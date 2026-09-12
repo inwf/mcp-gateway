@@ -269,24 +269,6 @@ func TestSearchingAggregatedTools(t *testing.T) {
 	}
 }
 
-// An obsolete filter must not silently broaden an existing client's query.
-func TestRemovedTagFiltersAreRejectedOnlyOnAggregatedEndpoints(t *testing.T) {
-	stack := start(t, map[string]string{"files": "full"})
-	for _, path := range []string{
-		"/api/tools?tag=team%3Dinfra", "/api/tools?q=echo&tag=team",
-		"/api/resources?tag=team", "/api/resources?tag=", "/api/tools?tag",
-	} {
-		var response map[string]any
-		stack.apiDo(t, http.MethodGet, path, nil, http.StatusBadRequest, &response)
-		encoded, _ := json.Marshal(response)
-		if !strings.Contains(string(encoded), "tag") || !strings.Contains(string(encoded), "removed") {
-			t.Errorf("%s did not explain the removed filter: %s", path, encoded)
-		}
-	}
-	// A field in the upstream namespace is not a gateway filter.
-	stack.apiGet(t, "/api/servers/files/tools?tag=business", nil)
-}
-
 // exposeOnly narrows a server's allow list to the named tools.
 //
 // The test harness exposes everything each server offers, because most

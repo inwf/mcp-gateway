@@ -85,15 +85,7 @@ schema；调用结果原样透传。
 `initialize.instructions` 会说明上述发现和调用路径，并指向指南。测试把工具名
 与实际注册清单对照，防止文案在工具改名后继续指向旧入口。
 
-## 兼容性与升级
-
-`get_tool` 改名为 `get_tool_details`；旧系统工具 `list_tools` 合并到搜索，
-`list_tags`、`update_server_description` 删除，不保留别名。MCP 协议的
-`tools/list`、CLI 的 `tools list`、上游工具暴露配置继续使用。
-
-旧服务器级标签需按[配置迁移](configuration.md#旧版标签配置迁移)手动移除。
-网关不会删除上游 schema、参数或结果中名为 `tags` 的业务字段。
-升级后让 MCP 客户端重新连接或刷新工具列表。
+## MCP 互操作
 
 Go 输出类型中的 schema 字段使用 `map[string]any`，避免生成布尔属性 schema
 导致 TypeScript MCP SDK 拒绝整个工具列表。兼容性检查同时覆盖 `tools/list`

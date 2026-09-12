@@ -193,14 +193,7 @@ mcphub tools call list_servers
 mcphub tools call search_tools --arg server=files --arg includeSchema=true --arg limit=2
 ```
 
-旧版升级：`get_tool` 改名为 `get_tool_details`；`list_tools` 并入 `search_tools`；
-`list_tags` 和 `update_server_description` 已移除，不保留别名。请让客户端重新连接
-或刷新工具列表。服务器描述仍可在 Web 或配置文件中编辑。
-
-服务器级标签也已移除。先备份配置，手动删除 `mcpServers.<名字>.tags`，再运行
-`mcphub config validate`；未知配置键仍严格报错。上游业务 schema、参数、结果和
-环境变量中的 `tags` 不受影响。CLI 的旧标签命令和选项不再提供，聚合工具、资源
-API 的旧 `tag` 查询参数会明确报错。
+服务器描述可在 Web 或配置文件中编辑。
 
 ## 会话模式
 

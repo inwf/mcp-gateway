@@ -36,9 +36,6 @@ type AggregatedTool struct {
 // ===== step 64: aggregated tools and resources =====
 
 func (a *API) handleAggregatedTools(c *gin.Context) {
-	if rejectLegacyTagFilter(c) {
-		return
-	}
 	if a.opts.Upstreams == nil {
 		c.JSON(http.StatusOK, gin.H{"tools": []AggregatedTool{}})
 		return
@@ -149,16 +146,6 @@ func searchWithin(query string, tools []AggregatedTool, limit int) []AggregatedT
 	return out
 }
 
-// Only the endpoints that formerly filtered by tag reject it. Silently
-// returning an unfiltered result would broaden an existing client's query.
-func rejectLegacyTagFilter(c *gin.Context) bool {
-	if c.Request.URL.Query().Has("tag") {
-		fail(c, BadRequest("the tag filter has been removed; remove the tag query parameter"))
-		return true
-	}
-	return false
-}
-
 // AggregatedResource is one upstream resource with its origin.
 type AggregatedResource struct {
 	Server string `json:"server"`
@@ -175,9 +162,6 @@ type AggregatedResource struct {
 }
 
 func (a *API) handleAggregatedResources(c *gin.Context) {
-	if rejectLegacyTagFilter(c) {
-		return
-	}
 	if a.opts.Upstreams == nil {
 		c.JSON(http.StatusOK, gin.H{"resources": []AggregatedResource{}})
 		return

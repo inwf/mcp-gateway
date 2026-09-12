@@ -113,8 +113,6 @@ function jsonMessage(t: (key: string) => string, reason: string): string {
       return t('form.jsonNotAnObject');
     case 'jsonOneServer':
       return t('form.jsonOneServer');
-    case 'jsonServerTagsRemoved':
-      return t('form.jsonServerTagsRemoved');
     default:
       return `${t('call.invalidJson')} — ${reason}`;
   }

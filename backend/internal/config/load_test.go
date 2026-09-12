@@ -345,6 +345,16 @@ func TestParseServerRefusesAnUnknownKey(t *testing.T) {
 	}
 }
 
+func TestATagsEnvironmentVariableIsStillValidConfiguration(t *testing.T) {
+	server, err := config.ParseServer([]byte("command: echo\nenv:\n  tags: business-data\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.Env["tags"] != "business-data" {
+		t.Errorf("upstream environment was modified: %v", server.Env)
+	}
+}
+
 // An empty document is a server that is entirely default, which is what
 // a create request with no body beyond a name means.
 func TestParseServerAcceptsAnEmptyDocument(t *testing.T) {

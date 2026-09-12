@@ -37,17 +37,10 @@ export function readPastedServer(text: string): { name?: string; server: MCPServ
     if (server === null || typeof server !== 'object' || Array.isArray(server)) {
       throw new Error('jsonNotAnObject');
     }
-    return { name, server: checkedServer(server) };
+    return { name, server: server as MCPServer };
   }
 
-  return { server: checkedServer(parsed) };
-}
-
-function checkedServer(value: object): MCPServer {
-  // Switching back to the form would otherwise silently discard this
-  // removed field before the backend's strict parser can report it.
-  if (Object.hasOwn(value, 'tags')) throw new Error('jsonServerTagsRemoved');
-  return value as MCPServer;
+  return { server: parsed as MCPServer };
 }
 
 /**

@@ -188,7 +188,6 @@ export const zh = {
       '可以只写用到的字段，其余按默认值处理。也接受 {"mcpServers": {"名字": {…}}} 这种包了一层的写法（只能有一台；多台请用批量导入）。',
     jsonNotAnObject: '这不是一个 JSON 对象',
     jsonOneServer: '这里只能编辑一台服务器；多台请用「批量导入」',
-    jsonServerTagsRemoved: '服务器级 tags 已移除，请先备份配置并手动删除该字段；环境变量中的 tags 可保留。',
     enabled: '启动时自动连接',
     key: '键',
     value: '值',

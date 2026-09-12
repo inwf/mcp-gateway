@@ -59,8 +59,8 @@ make build
 ```
 
 `make check` 包含 Go 格式、vet、race 测试和前端 typecheck、oxlint、Vitest。
-回归覆盖分页边界、游标失效范围、完整大 schema、隐藏工具、同名工具路由、旧配置
-拒绝，以及 stdio 和 HTTP 上游的业务 `tags` 透传。
+回归覆盖分页边界、游标失效范围、完整大 schema、隐藏工具、同名工具路由、通用配置
+校验，以及 stdio 和 HTTP 上游的业务 `tags` 透传。
 
 实际 TypeScript MCP SDK 检查是可选项，避免把 SDK 加入前端运行依赖。
 用 pnpm 装在独立目录，然后运行这一个 Go 集成测试：

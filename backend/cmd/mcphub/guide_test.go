@@ -109,8 +109,8 @@ func TestGuideDocumentsEverySystemTool(t *testing.T) {
 	if !ok {
 		t.Fatal("the guide has no system-tools section")
 	}
-	// Compare the current table, not mentions anywhere in the document:
-	// migration notes legitimately contain names of removed tools.
+	// Every registered tool needs an entry in the reference table;
+	// mentioning it in a call example does not document its purpose.
 	documented := map[string]bool{}
 	for _, line := range strings.Split(section, "\n") {
 		if rest, ok := strings.CutPrefix(line, "| `"); ok {
