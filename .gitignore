@@ -32,6 +32,7 @@ backend/internal/webui/dist/
 
 # ===== Node / frontend =====
 node_modules/
+.pnpm-store/
 frontend/dist/
 frontend/.vite/
 frontend/coverage/
